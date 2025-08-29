@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>大文件分片上传 Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    .progress-container { margin-top: 20px; width: 500px; }
+    .progress-bar { height: 24px; background: #4caf50; text-align: center; color: white; width: 0%; border-radius: 4px; }
+    .progress-wrapper { width: 100%; background: #ddd; border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
+    .file-item { margin-bottom: 15px; }
+    .file-name { font-size: 14px; margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+<h2>大文件分片上传 Demo</h2>
+<input type="file" id="fileInput" multiple webkitdirectory />
+<button id="uploadBtn">上传</button>
+
+<div id="progressList" class="progress-container"></div>
+<pre id="log"></pre>
+
+<script>
+const server = "http://127.0.0.1:8089";
+const bucketName = "public";
+const minChunkSize = 5 * 1024 * 1024; // MinIO 最小分片
+const maxFileConcurrency = 1;
+
+let files = [];
+
+document.getElementById("fileInput").addEventListener("change", (e) => {
+    files = Array.from(e.target.files);
+    let logMsg = "已选择文件：\n";
+    files.forEach(f => {
+        logMsg += ` - ${f.webkitRelativePath || f.name} (${(f.size / 1024 / 1024).toFixed(2)} MB)\n`;
+    });
+    log(logMsg);
+});
+
+document.getElementById("uploadBtn").addEventListener("click", async () => {
+    if (!files.length) { alert("请先选择文件或文件夹"); return; }
+    document.getElementById("progressList").innerHTML = "";
+    await runFileUploads();
+});
+
+function log(msg) { document.getElementById("log").textContent += msg + "\n"; }
+function createProgressBar(fileName) {
+    const container = document.createElement("div");
+    container.className = "file-item";
+    const name = document.createElement("div");
+    name.className = "file-name"; name.textContent = fileName;
+    const wrapper = document.createElement("div"); wrapper.className = "progress-wrapper";
+    const bar = document.createElement("div"); bar.className = "progress-bar"; bar.textContent = "0%";
+    wrapper.appendChild(bar); container.appendChild(name); container.appendChild(wrapper);
+    document.getElementById("progressList").appendChild(container);
+    return bar;
+}
+function updateProgress(bar, percent) { bar.style.width = percent + "%"; bar.textContent = percent + "%"; }
+
+function getDynamicChunkSize(fileSize) {
+    if (fileSize < 500 * 1024 * 1024) return 20 * 1024 * 1024;
+    if (fileSize < 2 * 1024 * 1024 * 1024) return 50 * 1024 * 1024;
+    if (fileSize < 10 * 1024 * 1024 * 1024) return 100 * 1024 * 1024;
+    return 200 * 1024 * 1024;
+}
+function getDynamicConcurrency(fileSize) {
+    if (fileSize < 2 * 1024 * 1024 * 1024) return 3;
+    if (fileSize < 10 * 1024 * 1024 * 1024) return 2;
+    return 1;
+}
+
+// 上传单个文件
+async function uploadFile(file) {
+    const objectName = file.webkitRelativePath || file.name;
+    const progressBar = createProgressBar(objectName);
+    const chunkSize = getDynamicChunkSize(file.size);
+    const concurrency = getDynamicConcurrency(file.size);
+// 1. 获取文件大小和原始文件名
+    const fileSize = file.size;
+    const originalFileName = file.name;
+	console.log(originalFileName)
+    // 小文件直接上传
+    if (file.size <= minChunkSize) {
+        const formData = new FormData();
+        formData.append("bucketName", bucketName);
+formData.append("files", file); // ✅ 传文件对象
+formData.append("objectNames", file.webkitRelativePath); // ✅ 保留路径
+formData.append("fileSize", fileSize); // ✅ 传文件对象
+formData.append("originalFileName", originalFileName); // ✅ 保留路径
+        try {
+        const response = await fetch(`${server}/file/multiUpload`, { 
+            method: "POST", 
+            body: formData 
+        });
+
+        // 打印原始响应对象
+        console.log("fetch响应对象：", response);
+
+        // 尝试解析为 JSON 并打印
+        const data = await response.json();
+        console.log("返回值内容：", data);
+
+        log(`小文件 ${objectName} 上传完成`);
+        updateProgress(progressBar, 100);
+    } catch (err) {
+        console.error("上传小文件出错：", err);
+    }
+        updateProgress(progressBar, 100);
+        return;
+    }
+
+    const totalChunks = Math.ceil(file.size / chunkSize);
+
+    // 初始化上传（返回 uploadId）
+    let initResp = await fetch(`${server}/file/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bucketName, objectName,fileSize,originalFileName })
+    });
+    if (!initResp.ok) { log(`文件 ${objectName} 初始化失败`); return; }
+    let { uploadId } = await initResp.json();
+    log(`文件 ${objectName} 初始化成功，UploadId: ${uploadId}`);
+
+    let current = 0;
+    let uploadedCount = 0;
+
+    async function uploadChunk(i, retries = 3) {
+        try {
+            const start = i * chunkSize;
+            const end = Math.min(file.size, start + chunkSize);
+            const blob = file.slice(start, end);
+
+            if (blob.size < minChunkSize && i !== totalChunks - 1) return;
+
+            const formData = new FormData();
+            formData.append("bucketName", bucketName);
+            formData.append("objectName", objectName);
+            formData.append("uploadId", uploadId);
+            formData.append("partNumber", i + 1);
+            formData.append("file", blob);
+
+            await fetch(`${server}/file/uploadPart`, { method: "POST", body: formData });
+            uploadedCount++;
+            updateProgress(progressBar, Math.floor((uploadedCount / totalChunks) * 100));
+            log(`文件 ${objectName} 分片 ${i + 1}/${totalChunks} 上传完成`);
+        } catch (e) {
+            if (retries > 0) { log(`文件 ${objectName} 分片 ${i + 1} 上传失败，重试 ${retries}`); await uploadChunk(i, retries - 1); }
+            else { log(`文件 ${objectName} 分片 ${i + 1} 上传失败，已放弃`); throw e; }
+        }
+    }
+
+    async function worker() {
+        while (current < totalChunks) {
+            let i = current++;
+            await uploadChunk(i);
+        }
+    }
+
+    const workers = [];
+    for (let i = 0; i < concurrency; i++) workers.push(worker());
+    await Promise.all(workers);
+
+    // 让后端统一完成上传
+    await fetch(`${server}/file/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bucketName, objectName, uploadId })
+    });
+    log(`文件 ${objectName} 上传完成`);
+    updateProgress(progressBar, 100);
+}
+
+// 文件并发上传
+async function runFileUploads() {
+    let index = 0;
+    async function worker() {
+        while (index < files.length) {
+            const file = files[index++];
+            await uploadFile(file);
+        }
+    }
+    const workers = [];
+    for (let i = 0; i < maxFileConcurrency; i++) workers.push(worker());
+    await Promise.all(workers);
+}
+</script>
+</body>
+</html>
