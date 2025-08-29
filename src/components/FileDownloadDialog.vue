@@ -212,8 +212,6 @@ const PROGRESS_UPDATE_INTERVAL = 100; // 100ms更新一次，避免过于频繁
 // 下载单个文件
 const downloadSingleFile = async (item) => {
   try {
-    console.log('开始下载文件:', item.file.originalFileName, '对象名:', item.file.minioObjectName);
-
     item.status = 'downloading';
     item.progress = 0;
     item.error = null;
@@ -276,7 +274,6 @@ const downloadSingleFile = async (item) => {
     }, customDownloadPath);
 
     if (result.success) {
-      console.log('文件下载成功:', item.file.originalFileName);
       item.status = 'completed';
       item.progress = 100;
       item.estimatedTime = 0;

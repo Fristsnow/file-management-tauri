@@ -1,15 +1,5 @@
 <template>
   <div class="file-manager" @dragover="handleDragOver" @drop="handleDrop">
-    <!-- 左侧文件树 -->
-    <!-- <FileTree
-        ref="fileTreeRef"
-        :current-folder="fileStore.currentFolder"
-        :tree-data="fileStore.treeData"
-        class="left-tree"
-        @tree-click="handleTreeClick"
-        @load-children="handleLoadChildren"
-    /> -->
-
     <!-- 右侧主区域 -->
     <div class="main">
       <!-- 面包屑导航 -->
@@ -67,62 +57,54 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { useFileStore } from '@/stores/fileStore';
-import { getFtpFileApi, uploadSingleFileApi, fileDownload, fileDeleteApi, folderDeleteApi, downloadFileToLocal, createFolderApi } from '@/api/ftp.js';
-import FileTree from '@/components/FileTree.vue';
+import {ref, onMounted, nextTick} from 'vue';
+import {ElMessage, ElMessageBox} from 'element-plus';
+import {useFileStore} from '@/stores/fileStore';
+import {
+  getFtpFileApi,
+  fileDeleteApi,
+  folderDeleteApi,
+  createFolderApi
+} from '@/api/ftp.js';
 import FileList from '@/components/FileList.vue';
 import Breadcrumb from '@/components/Breadcrumb.vue';
 import FileUploadDialog from '@/components/FileUploadDialog.vue';
 import FileDownloadDialog from '@/components/FileDownloadDialog.vue';
 
-const router = useRouter();
 const fileStore = useFileStore();
 const fileTreeRef = ref(null);
 const showUploadDialog = ref(false);
 const showDownloadDialog = ref(false);
 const dragFiles = ref([]);
 const downloadFiles = ref([]);
-// 移除本地downloadQueue，使用fileStore中的downloadQueue
 
-// 当前文件夹ID缓存
 const folderIdCache = ref(new Map());
 
-// 获取当前文件夹ID
 const getCurrentFolderId = () => {
-  // 如果是根目录，返回0
   if (fileStore.currentFolder === '/') {
     return 0;
   }
 
-  // 首先尝试从缓存中获取
   const cachedId = folderIdCache.value.get(fileStore.currentFolder);
   if (cachedId !== undefined) {
     return cachedId;
   }
 
-  // 如果缓存中没有，尝试从文件列表中的第一个项目获取parentId
-  // 因为当前目录下的所有项目的parentId就是当前目录的ID
   const firstItem = fileStore.fileList.find(item => item.parentId !== undefined && item.parentId !== null);
   if (firstItem) {
-    // 缓存结果
+
     folderIdCache.value.set(fileStore.currentFolder, firstItem.parentId);
     return firstItem.parentId;
   }
 
-  // 如果都没有找到，返回0（根目录）
   console.warn('无法获取当前文件夹ID，路径:', fileStore.currentFolder, '，使用根目录ID: 0');
   return 0;
 };
 
-// 设置当前文件夹ID缓存
 const setCurrentFolderIdCache = (path, id) => {
   folderIdCache.value.set(path, id);
 };
 
-// 统一的数据加载函数
 const loadFolderData = async (folderId) => {
   try {
     const targetId = folderId === 0 || folderId === '0' ? '0' : folderId.toString();
@@ -132,29 +114,31 @@ const loadFolderData = async (folderId) => {
 
     const data = res.data || [];
 
-    // 处理文件列表数据
-    const fileListData = data.map(dataItem => {
-      let fileType;
-      if (dataItem.isDir === 1) {
-        fileType = 'folder';
-      } else {
-        // 从文件名中提取扩展名作为文件类型
-        const fileName = dataItem.originalFileName || '';
-        const lastDotIndex = fileName.lastIndexOf('.');
-        fileType = lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1).toLowerCase() : 'unknown';
-      }
-      
-      return {
-        id: dataItem.id,
-        originalFileName: dataItem.originalFileName,
-        parentId: dataItem.parentId,
-        minioObjectName: dataItem.minioObjectName,
-        fileType: fileType,
-        isFolder: dataItem.isDir === 1,
-        fileSize: dataItem.fileSize,
-        createdAt: dataItem.createdAt,
-        updatedAt: dataItem.updatedAt
-      };    });
+    const fileListData = data
+        .filter(i => i.originalFileName !== ".folder_placeholder")
+        .map(dataItem => {
+          let fileType;
+          if (dataItem.isDir === 1) {
+            fileType = 'folder';
+          } else {
+            // 从文件名中提取扩展名作为文件类型
+            const fileName = dataItem.originalFileName || '';
+            const lastDotIndex = fileName.lastIndexOf('.');
+            fileType = lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1).toLowerCase() : 'unknown';
+          }
+
+          return {
+            id: dataItem.id,
+            originalFileName: dataItem.originalFileName,
+            parentId: dataItem.parentId,
+            minioObjectName: dataItem.minioObjectName,
+            fileType: fileType,
+            isFolder: dataItem.isDir === 1,
+            fileSize: dataItem.fileSize,
+            createdAt: dataItem.createdAt,
+            updatedAt: dataItem.updatedAt
+          };
+        });
 
     return {
       fileListData,
@@ -169,7 +153,6 @@ const loadFolderData = async (folderId) => {
   }
 };
 
-// 批量下载
 const handleBatchDownload = (files) => {
   if (files.length === 0) {
     ElMessage.warning('请选择要下载的文件');
@@ -180,7 +163,6 @@ const handleBatchDownload = (files) => {
   showDownloadDialog.value = true;
 };
 
-// 批量删除
 const handleBatchDelete = async (files) => {
   if (files.length === 0) {
     ElMessage.warning('请选择要删除的文件');
@@ -225,7 +207,6 @@ const handleAddToDownload = (file) => {
 };
 
 
-
 // 下载完成回调
 const handleDownloadComplete = (result) => {
   ElMessage.success(`下载完成：成功 ${result.completed} 个，失败 ${result.failed} 个`);
@@ -245,7 +226,7 @@ const loadFolder = async (folderPath, folderId = null) => {
       setCurrentFolderIdCache(folderPath, targetFolderId);
     }
 
-    const { fileListData } = await loadFolderData(targetFolderId);
+    const {fileListData} = await loadFolderData(targetFolderId);
 
     if (folderPath === '/') {
       const initialTreeData = [{
@@ -280,7 +261,7 @@ const navigateToPath = async (targetPath) => {
     let currentId = 0;
 
     for (const part of pathParts) {
-      const { rawData } = await loadFolderData(currentId.toString());
+      const {rawData} = await loadFolderData(currentId.toString());
       const folders = rawData.filter(item => item.isDir === 1);
 
       const targetFolder = folders.find(folder => folder.originalFileName === part);
@@ -293,7 +274,7 @@ const navigateToPath = async (targetPath) => {
       currentId = targetFolder.id;
     }
 
-    const { fileListData } = await loadFolderData(currentId.toString());
+    const {fileListData} = await loadFolderData(currentId.toString());
     fileStore.setFileList(fileListData);
     fileStore.setCurrentFolder(targetPath);
     setCurrentFolderIdCache(targetPath, currentId);
@@ -330,7 +311,7 @@ const goBack = async () => {
     const parentPathParts = parentPath.split('/').filter(part => part);
 
     for (const part of parentPathParts) {
-      const { rawData } = await loadFolderData(currentId.toString());
+      const {rawData} = await loadFolderData(currentId.toString());
       const folders = rawData.filter(item => item.isDir === 1);
 
       const targetFolder = folders.find(folder => folder.originalFileName === part);
@@ -357,8 +338,8 @@ const goBack = async () => {
 // 进入文件夹
 const enterFolder = async (folder) => {
   const newPath = fileStore.currentFolder === '/'
-    ? `/${folder.originalFileName}`
-    : `${fileStore.currentFolder}/${folder.originalFileName}`;
+      ? `/${folder.originalFileName}`
+      : `${fileStore.currentFolder}/${folder.originalFileName}`;
 
   // 先加载新文件夹内容
   await loadFolder(newPath, folder.id);
@@ -366,61 +347,6 @@ const enterFolder = async (folder) => {
   // 然后确保左侧树节点路径已加载并展开到目标节点
   if (folder && folder.id) {
     await ensureTreeNodeLoaded(folder);
-  }
-};
-
-// 树节点点击
-const handleTreeClick = async (node) => {
-  console.log('点击左侧树节点:', node);
-
-  try {
-    const folderId = node.id === 0 ? '0' : node.id;
-    const { fileListData } = await loadFolderData(folderId);
-    console.log('左侧树数据加载完成:', fileListData);
-
-    fileStore.setFileList(fileListData);
-
-    const folderPath = node.id === 0 ? '/' : node.minioObjectName;
-    fileStore.setCurrentFolder(folderPath);
-
-    setCurrentFolderIdCache(folderPath, node.id === 0 ? 0 : node.id);
-
-    console.log('左侧树切换完成');
-  } catch (error) {
-    console.error('左侧树加载失败:', error);
-  }
-};
-
-// 树节点加载子节点
-const handleLoadChildren = async (nodeInfo) => {
-  try {
-    console.log('懒加载子节点:', nodeInfo);
-
-    const folderId = nodeInfo.isRoot ? '0' : nodeInfo.id;
-    const { rawData } = await loadFolderData(folderId);
-    const folders = rawData.filter(item => item.isDir === 1);
-
-    const children = folders.map(folder => ({
-      originalFileName: folder.originalFileName,
-      id: folder.id,
-      parentId: folder.parentId,
-      minioObjectName: folder.minioObjectName,
-      fileType: 'folder',
-      isFolder: true,
-      isLeaf: false
-    }));
-
-    if (nodeInfo.resolve) {
-      nodeInfo.resolve(children);
-    }
-
-    return children;
-  } catch (error) {
-    console.error('懒加载失败:', error);
-    if (nodeInfo.resolve) {
-      nodeInfo.resolve([]);
-    }
-    return [];
   }
 };
 
@@ -432,15 +358,15 @@ const uploadFile = () => {
 // 新建文件夹
 const createNewFolder = async () => {
   try {
-    const { value: folderName } = await ElMessageBox.prompt(
-      '请输入文件夹名称',
-      '新建文件夹',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        // inputPattern: /^[^\\/:*?"<>|]+$/,
-        // inputErrorMessage: '文件夹名称不能包含特殊字符 \\ / : * ? " < > |'
-      }
+    const {value: folderName} = await ElMessageBox.prompt(
+        '请输入文件夹名称',
+        '新建文件夹',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          // inputPattern: /^[^\\/:*?"<>|]+$/,
+          // inputErrorMessage: '文件夹名称不能包含特殊字符 \\ / : * ? " < > |'
+        }
     );
 
     if (!folderName || !folderName.trim()) {
@@ -450,7 +376,7 @@ const createNewFolder = async () => {
 
     // 检查是否已存在同名文件夹
     const existingFolder = fileStore.fileList.find(
-      item => item.originalFileName === folderName.trim() && item.isFolder
+        item => item.originalFileName === folderName.trim() && item.isFolder
     );
 
     if (existingFolder) {
@@ -465,9 +391,9 @@ const createNewFolder = async () => {
 
     // 调用API创建文件夹
     await createFolderApi(
-      folderName.trim(),
-      currentFolderId,
-      fileStore.currentFolder
+        folderName.trim(),
+        currentFolderId,
+        fileStore.currentFolder
     );
 
     ElMessage.success(`文件夹 "${folderName.trim()}" 创建成功`);
@@ -483,23 +409,17 @@ const createNewFolder = async () => {
   }
 };
 
-// 处理上传确认 - 上传已在FileUploadDialog中完成，这里只负责刷新文件列表
 const handleUploadConfirm = async () => {
   dragFiles.value = [];
 
-  // 上传已在FileUploadDialog组件中完成，这里只需要刷新文件列表
   await refreshCurrentFolder();
 };
 
-// 注意：上传相关的函数已移至FileUploadDialog组件中，避免重复上传逻辑
-
-// 文件下载 - 统一使用弹窗下载，提供进度显示和错误处理
 const handleDownload = (file) => {
   downloadFiles.value = [file];
   showDownloadDialog.value = true;
 };
 
-// 处理删除
 const handleDelete = async (item) => {
   try {
     const isFolder = item.fileType === 'folder' || item.isFolder === true || item.isDir === 1;
@@ -507,13 +427,13 @@ const handleDelete = async (item) => {
 
     // 确认删除
     const confirmed = await ElMessageBox.confirm(
-      `确定要删除${itemType} "${item.originalFileName}" 吗？此操作不可恢复！`,
-      `删除${itemType}`,
-      {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
+        `确定要删除${itemType} "${item.originalFileName}" 吗？此操作不可恢复！`,
+        `删除${itemType}`,
+        {
+          confirmButtonText: '确定删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
     ).catch(() => false);
 
     if (!confirmed) {
@@ -535,7 +455,7 @@ const handleDelete = async (item) => {
     // 刷新文件列表
     const currentFolderId = fileStore.currentFolder === '/' ? '0' : getCurrentFolderId();
     const targetId = currentFolderId || '0';
-    const { fileListData } = await loadFolderData(targetId);
+    const {fileListData} = await loadFolderData(targetId);
     fileStore.setFileList(fileListData);
 
     // 刷新文件树
@@ -556,14 +476,13 @@ const buildPathToFolder = async (targetFolder) => {
   const path = [];
   let currentFolder = targetFolder;
 
-  // 从目标文件夹向上追溯到根目录
   while (currentFolder && currentFolder.id !== 0) {
     path.unshift(currentFolder);
 
     // 查找父文件夹
     if (currentFolder.parentId !== null && currentFolder.parentId !== 0) {
       try {
-        const { rawData } = await loadFolderData(currentFolder.parentId.toString());
+        const {rawData} = await loadFolderData(currentFolder.parentId.toString());
         currentFolder = rawData.find(item => item.id === currentFolder.parentId && item.isDir === 1);
       } catch (error) {
         console.error('查找父文件夹失败:', error);
@@ -641,8 +560,6 @@ const ensureTreeNodeLoaded = async (targetFolder) => {
   }
 };
 
-
-
 // 拖拽事件处理
 const handleDragOver = (e) => {
   e.preventDefault();
@@ -671,7 +588,7 @@ const refreshCurrentFolder = async () => {
       // 获取当前文件夹ID并刷新
       const currentFolderId = getCurrentFolderId();
       if (currentFolderId) {
-        const { fileListData } = await loadFolderData(currentFolderId.toString(), { forceRefresh: true });
+        const {fileListData} = await loadFolderData(currentFolderId.toString(), {forceRefresh: true});
         fileStore.setFileList(fileListData);
       } else {
         // 如果无法获取当前文件夹ID，使用路径导航重新加载
@@ -689,15 +606,6 @@ const refreshCurrentFolder = async () => {
     console.error('刷新文件夹失败:', error);
     ElMessage.error('刷新失败');
   }
-};
-
-// 格式化文件大小
-const formatFileSize = (bytes) => {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
 // 组件挂载时初始化
@@ -750,10 +658,12 @@ onMounted(async () => {
 .left-tree::-webkit-scrollbar {
   width: 6px;
 }
+
 .left-tree::-webkit-scrollbar-thumb {
   background: #dcdfe6;
   border-radius: 4px;
 }
+
 .left-tree::-webkit-scrollbar-thumb:hover {
   background: #c0c4cc;
 }
@@ -795,6 +705,7 @@ onMounted(async () => {
     gap: 8px;
     padding: 8px;
   }
+
   .left-tree {
     width: 220px;
   }
@@ -805,12 +716,15 @@ onMounted(async () => {
     flex-direction: row;
     gap: 6px;
   }
+
   .left-tree {
     width: 200px;
   }
+
   .toolbar {
     padding: 10px;
   }
+
   .toolbar .el-button {
     padding: 6px 12px;
     font-size: 13px;
@@ -822,13 +736,16 @@ onMounted(async () => {
     flex-direction: column;
     padding: 6px;
   }
+
   .left-tree {
     display: none; /* 小屏幕隐藏文件树 */
   }
+
   .toolbar {
     justify-content: space-between;
     padding: 8px;
   }
+
   .toolbar .el-button {
     flex: 1;
     min-width: 80px;
@@ -843,6 +760,7 @@ onMounted(async () => {
     gap: 6px;
     padding: 6px;
   }
+
   .toolbar .el-button {
     flex: 1 1 48%;
     min-width: 0;
@@ -850,6 +768,7 @@ onMounted(async () => {
     padding: 6px;
     justify-content: center;
   }
+
   .toolbar .el-button .el-icon {
     margin-right: 0;
   }
@@ -859,6 +778,7 @@ onMounted(async () => {
   .toolbar {
     gap: 4px;
   }
+
   .toolbar .el-button {
     font-size: 11px;
     padding: 4px 6px;

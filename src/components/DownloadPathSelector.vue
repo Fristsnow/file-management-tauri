@@ -107,10 +107,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'path-changed']);
 
-// 使用设置store
 const settingsStore = useSettingsStore();
 
-// 响应式数据
 const pathType = ref('default');
 const customPath = ref('');
 const rememberChoice = ref(false);

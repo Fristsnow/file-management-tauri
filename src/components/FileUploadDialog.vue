@@ -1,54 +1,143 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from "vue";
 import { ElMessage, ElProgress, ElMessageBox } from "element-plus";
-import { Folder, Document, Upload, VideoPause, VideoPlay } from "@element-plus/icons-vue";
+import { Folder, Document, Upload, VideoPause, VideoPlay, InfoFilled } from "@element-plus/icons-vue";
 import { uploadSingleFileApi, uploadSmallFileApi, formatFileSize, uploadFolderApi, abortMultipartUploadApi } from '@/api/ftp.js';
 import { getUserInfoApi } from '@/api/login.js';
 import { useFileStore } from '@/stores/fileStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 // 恢复进度组件到上传对话框中
-import PendingFileList from './PendingFileList.vue';
+import FolderStructureList from './FolderStructureList.vue';
 import UploadProgress from './UploadProgress.vue';
 
-// Tauri API导入
-let tauriEvent = null;
-let tauriApp = null;
-let tauriInvoke = null;
-let tauriDialog = null;
-const isTauri = ref(false);
+// 导入统一拖拽处理器
+import { dragHandler } from '@/utils/dragHandler.js';
 
-// 动态导入Tauri API
-const initTauri = async () => {
+// 拖拽处理器相关状态
+const dragHandlerInitialized = ref(false);
+const dragEventHandlers = ref(null);
+const environmentInfo = ref(null);
+
+// 兼容性：保留isTauri引用
+const isTauri = computed(() => environmentInfo.value?.isTauri || false);
+
+// 初始化拖拽处理器
+const initDragHandler = async () => {
   try {
-    // 判断是否在 Tauri 环境
-    const isRunningInTauri =
-        typeof window !== "undefined" &&
-        "__TAURI_INTERNALS__" in window; // ✅ 推荐判断方式
+    
+    const result = await dragHandler.initialize({
+      onFileDrop: handleFileDrop
+    });
+    
+    if (result.success) {
+      dragHandlerInitialized.value = true;
+      dragEventHandlers.value = result.handlers;
+      environmentInfo.value = dragHandler.getEnvironmentInfo();
+      
+      return result;
+    } else {
+      throw new Error(result.error || '拖拽处理器初始化失败');
+    }
+  } catch (error) {
+    // 初始化失败时，设置基本的环境信息
+    dragHandlerInitialized.value = false;
+    dragEventHandlers.value = null;
+    environmentInfo.value = {
+      isTauri: false,
+      userAgent: navigator.userAgent,
+      fallbackMode: true
+    };
+    
+    // 显示用户友好的提示
+    ElMessage.warning('拖拽处理器初始化失败，已启用基础拖拽功能');
+    
+    return { success: false, error: error.message, fallbackMode: true };
+  }
+};
 
-    if (!isRunningInTauri) {
-      console.log("🌐 当前运行在浏览器环境");
-      isTauri.value = false;
-      return;
+// 专门用于拖拽的文件夹上传处理方法
+const handleDragFolderUpload = async (folderPath, files) => {
+  const envInfo = environmentInfo.value;
+  if (!envInfo?.isTauri) {
+    throw new Error('拖拽文件夹上传仅支持Tauri环境');
+  }
+
+  try {
+    // 获取用户信息和上传配置
+    const userInfo = await getUserInfoApi();
+    // 上传配置
+    const uploadConfig = {
+      baseUrl: 'http://localhost:8089',
+      bucketName: 'public',
+      token: localStorage.getItem('token'),
+      targetPath: props.currentPath || '/'
+    };
+
+    ElMessage.info('正在处理拖拽的文件夹...');
+
+    // 动态导入Tauri invoke函数
+    const { invoke } = await import('@tauri-apps/api/core');
+    
+    // 调用专门的拖拽文件夹上传命令
+    const uploadResult = await invoke('upload_drag_folder_with_structure', {
+      folderPath: folderPath,
+      config: uploadConfig
+    });
+
+    if (uploadResult.success) {
+      ElMessage.success(`拖拽文件夹上传完成！${uploadResult.message}`);
+      return {
+        success: true,
+        uploadedFiles: uploadResult.uploaded_files,
+        failedFiles: uploadResult.failed_files
+      };
+    } else {
+      throw new Error(uploadResult.message);
     }
 
-    console.log("🚀 检测到 Tauri 环境，正在初始化...");
-
-    // 动态导入 Tauri API
-    const { listen } = await import("@tauri-apps/api/event");
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const { invoke } = await import("@tauri-apps/api/core");
-    const { open } = await import("@tauri-apps/plugin-dialog");
-
-    tauriEvent = { listen };
-    tauriApp = getCurrentWindow();
-    tauriInvoke = invoke;
-    tauriDialog = { open };
-    isTauri.value = true;
-
-    console.log("✅ Tauri API 初始化完成");
   } catch (error) {
-    console.error("❌ Tauri 初始化失败:", error);
-    isTauri.value = false;
+    throw error;
+  }
+};
+
+// 文件拖拽处理回调函数
+const handleFileDrop = async (files, metadata) => {
+  // 为拖拽的文件添加拖拽标记
+  const draggedFiles = files.map(file => {
+    // 为每个文件添加拖拽标记
+    file.isDragFile = true;
+    return file;
+  });
+  
+  // 根据拖拽内容类型设置标志
+  if (metadata.hasDirectories && !metadata.hasFiles) {
+    // 只有文件夹
+    isFolder.value = true;
+    isFile.value = false;
+  } else if (metadata.hasFiles && !metadata.hasDirectories) {
+    // 只有文件
+    isFile.value = true;
+    isFolder.value = false;
+  } else if (metadata.hasDirectories && metadata.hasFiles) {
+    // 混合内容，优先显示文件夹进度
+    isFolder.value = true;
+    isFile.value = false;
+  } else {
+    // 默认情况
+    isFile.value = true;
+    isFolder.value = false;
+  }
+  
+  // 添加标记后的文件到待上传列表
+  addFiles(draggedFiles);
+  
+  // 根据内容类型显示不同的提示信息
+  if (metadata.hasDirectories && metadata.hasFiles) {
+    ElMessage.success(`成功添加 ${files.length} 个项目到上传列表（包含文件和文件夹）`);
+  } else if (metadata.hasDirectories) {
+    ElMessage.success(`成功添加文件夹内容到上传列表，共 ${files.length} 个项目`);
+  } else {
+    ElMessage.success(`成功添加 ${files.length} 个文件到上传列表`);
   }
 };
 
@@ -68,10 +157,8 @@ const dialogVisible = computed({
   set: (value) => emit('update:modelValue', value)
 });
 
-// Tauri事件监听器引用
-let tauriFileDropUnlisten = null;
-
-const isDragging = ref(false);
+// 拖拽状态（从拖拽处理器获取）
+const isDragging = computed(() => dragEventHandlers.value?.isDragging?.value || false);
 
 // 初始化 fileStore 和 userStore
 const fileStore = useFileStore();
@@ -105,7 +192,6 @@ const performanceMonitor = {
 
   end() {
     const duration = performance.now() - this.startTime;
-    console.log(`上传${this.fileCount}个文件耗时: ${duration.toFixed(2)}ms`);
     this.showPerformanceTip.value = false;
   }
 };
@@ -124,7 +210,6 @@ const wsConnected = ref(false);
 const waitForWebSocketConnection = () => {
   return new Promise(async (resolve, reject) => {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      console.log('WebSocket已经连接，直接继续');
       resolve();
       return;
     }
@@ -133,7 +218,6 @@ const waitForWebSocketConnection = () => {
 
     // 设置连接超时
     const timeout = setTimeout(() => {
-      console.error('WebSocket连接超时');
       reject(new Error('WebSocket连接超时'));
     }, 10000); // 10秒超时
 
@@ -142,7 +226,6 @@ const waitForWebSocketConnection = () => {
     ws.value.onopen = (event) => {
       clearTimeout(timeout);
       if (originalOnOpen) originalOnOpen(event);
-      console.log('WebSocket连接建立，可以开始上传');
       resolve();
     };
 
@@ -844,14 +927,19 @@ const handleAddFiles = async (e) => {
 
 // Tauri文件夹选择方法
 const handleTauriFolderSelect = async () => {
-  if (!isTauri.value || !tauriDialog) {
+  const envInfo = environmentInfo.value;
+  if (!envInfo?.isTauri) {
     ElMessage.error('Tauri环境未初始化');
     return;
   }
 
   try {
+    // 动态导入Tauri API
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { invoke } = await import('@tauri-apps/api/core');
+    
     // 使用Tauri对话框选择文件夹
-    const folderPath = await tauriDialog.open({
+    const folderPath = await open({
       directory: true,
       multiple: false,
       title: '选择文件夹'
@@ -864,7 +952,7 @@ const handleTauriFolderSelect = async () => {
     ElMessage.info('正在扫描文件夹结构...');
 
     // 调用Rust命令扫描文件夹结构
-    const scanResult = await tauriInvoke('scan_folder_structure', {
+    const scanResult = await invoke('scan_folder_structure', {
       folderPath: folderPath
     });
 
@@ -919,9 +1007,23 @@ const handleTauriFolderSelect = async () => {
   }
 };
 
-// Tauri文件夹上传方法
+// 测试拖拽功能
+const testTauriDragFunction = () => {
+  console.log('🧪 开始测试拖拽功能');
+  
+  // 使用新的拖拽处理器进行测试
+  if (dragHandler && dragHandler.testDragFunction) {
+    dragHandler.testDragFunction();
+  } else {
+    console.warn('⚠️ 拖拽处理器未初始化或测试功能不可用');
+    ElMessage.warning('拖拽处理器未初始化，请先初始化拖拽功能');
+  }
+};
+
+// Tauri文件夹上传方法 - 用于按钮选择的文件夹上传
 const handleTauriFolderUpload = async (folderPath, files) => {
-  if (!isTauri.value || !tauriInvoke) {
+  const envInfo = environmentInfo.value;
+  if (!envInfo?.isTauri) {
     throw new Error('Tauri环境未初始化');
   }
 
@@ -942,8 +1044,11 @@ const handleTauriFolderUpload = async (folderPath, files) => {
 
     ElMessage.info('正在使用Rust后端上传文件夹...');
 
+    // 动态导入Tauri invoke函数
+    const { invoke } = await import('@tauri-apps/api/core');
+    
     // 调用Rust命令上传文件夹
-    const uploadResult = await tauriInvoke('upload_folder_with_structure', {
+    const uploadResult = await invoke('upload_folder_with_structure', {
       folderPath: folderPath,
       config: uploadConfig
     });
@@ -965,273 +1070,268 @@ const handleTauriFolderUpload = async (folderPath, files) => {
   }
 };
 
-// 拖拽区域
-const handleDrop = async (e) => {
+// Tauri拖拽文件夹上传方法 - 专门用于拖拽场景
+const handleTauriDragFolderUpload = async (folderPath, files) => {
+  const envInfo = environmentInfo.value;
+  if (!envInfo?.isTauri) {
+    throw new Error('Tauri环境未初始化');
+  }
+
+  try {
+    // 获取用户信息和上传配置
+    const userInfo = await getUserInfoApi();
+    
+    // 上传配置
+    const uploadConfig = {
+      baseUrl: 'http://localhost:8089',
+      bucketName: 'public',
+      token: localStorage.getItem('token'),
+      targetPath: props.currentPath || '/'
+    };
+
+    ElMessage.info('正在使用Rust后端处理拖拽文件夹上传...');
+
+    // 动态导入Tauri invoke函数
+    const { invoke } = await import('@tauri-apps/api/core');
+    
+    // 调用专门的拖拽文件夹上传命令
+    const uploadResult = await invoke('upload_drag_folder_with_structure', {
+      folderPath: folderPath,
+      config: uploadConfig
+    });
+
+    if (uploadResult.success) {
+      ElMessage.success(`拖拽文件夹上传完成！${uploadResult.message}`);
+      return {
+        success: true,
+        uploadedFiles: uploadResult.uploaded_files,
+        failedFiles: uploadResult.failed_files
+      };
+    } else {
+      throw new Error(uploadResult.message);
+    }
+
+  } catch (error) {
+    console.error('拖拽文件夹上传失败:', error);
+    throw error;
+  }
+};
+
+// 统一拖拽事件处理器（使用新的拖拽处理器）
+const handleDrop = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  isDragging.value = false;
+  
+  const handler = dragEventHandlers.value?.drop;
+  if (handler) {
+    handler(e);
+  } else {
+    console.warn('⚠️ 拖拽处理器未初始化或drop处理器不可用，使用回退处理');
+    // 回退处理：直接处理拖拽的文件
+    handleFallbackDrop(e);
+  }
+};
 
-  // 在Tauri环境中，文件拖拽由Tauri事件处理，这里只处理浏览器环境
-  if (!isTauri.value) {
+// 回退拖拽处理方法
+const handleFallbackDrop = async (e) => {
+  try {
+    // 首先尝试使用 webkitGetAsEntry API 处理文件夹
     const items = Array.from(e.dataTransfer.items);
     const files = [];
     let hasDirectories = false;
     let hasFiles = false;
-
-    // 处理拖拽的项目（支持文件夹）
+    
+    // 处理拖拽项目
     for (const item of items) {
       if (item.kind === 'file') {
         const entry = item.webkitGetAsEntry();
         if (entry) {
           if (entry.isDirectory) {
             hasDirectories = true;
+            await processFallbackBrowserEntry(entry, files);
           } else if (entry.isFile) {
             hasFiles = true;
+            await processFallbackBrowserEntry(entry, files);
           }
-          await processEntry(entry, files);
         }
       }
     }
-
+    
     // 如果没有通过 webkitGetAsEntry 获取到文件，回退到传统方式
     if (files.length === 0) {
+      console.log('⚠️ webkitGetAsEntry 未获取到文件，使用传统方式');
       const fallbackFiles = Array.from(e.dataTransfer.files);
       files.push(...fallbackFiles);
-      // 传统方式只能获取文件，不能获取文件夹
       if (fallbackFiles.length > 0) {
         hasFiles = true;
+        console.log(`传统方式获取到 ${fallbackFiles.length} 个文件`);
       }
     }
-
-    // 根据拖拽内容类型设置标志
-    if (hasDirectories && !hasFiles) {
-      // 只有文件夹
-      isFolder.value = true;
-      isFile.value = false;
-    } else if (hasFiles && !hasDirectories) {
-      // 只有文件
-      isFile.value = true;
-      isFolder.value = false;
-    } else if (hasDirectories && hasFiles) {
-      // 混合内容，优先显示文件夹进度
-      isFolder.value = true;
-      isFile.value = false;
-    } else {
-      // 默认情况
-      isFile.value = true;
-      isFolder.value = false;
-    }
-
-    addFiles(files);
-  }
-};
-
-// Tauri文件拖拽处理
-const handleTauriFileDrop = async (event) => {
-  try {
-    const files = [];
-    let hasDirectories = false;
-    let hasFiles = false;
-
-    for (const filePath of event.payload.paths) {
-      // 使用Tauri的文件系统插件API读取文件信息
-      const { readFile, stat } = await import('@tauri-apps/plugin-fs');
-      const { basename, dirname } = await import('@tauri-apps/api/path');
-
-      try {
-        const fileMetadata = await stat(filePath);
-        const fileName = await basename(filePath);
-        const dirPath = await dirname(filePath);
-
-        if (fileMetadata.isFile) {
-          hasFiles = true;
-          const fileContent = await readFile(filePath);
-          const file = new File([fileContent], fileName, {
-            type: getMimeType(fileName),
-            lastModified: fileMetadata.modifiedAt?.getTime() || Date.now()
-          });
-
-          // 为文件添加路径信息
-          Object.defineProperty(file, 'webkitRelativePath', {
-            value: fileName,
-            writable: false
-          });
-
-          files.push(file);
-        } else if (fileMetadata.isDirectory) {
-          hasDirectories = true;
-          // 处理文件夹拖拽 - 递归读取文件夹内容
-          await processTauriDirectory(filePath, files, fileName);
-        }
-      } catch (error) {
-        console.error(`Error reading file ${filePath}:`, error);
-      }
-    }
-
-    // 根据拖拽内容类型设置标志
-    if (hasDirectories && !hasFiles) {
-      // 只有文件夹
-      isFolder.value = true;
-      isFile.value = false;
-    } else if (hasFiles && !hasDirectories) {
-      // 只有文件
-      isFile.value = true;
-      isFolder.value = false;
-    } else {
-      // 混合内容，优先显示文件夹进度
-      isFolder.value = true;
-      isFile.value = false;
-    }
-
+    
     if (files.length > 0) {
-      addFiles(files);
-
-    }
-  } catch (error) {
-    console.error('Error handling Tauri file drop:', error);
-  }
-};
-
-// 简单的MIME类型检测
-const getMimeType = (fileName) => {
-  const ext = fileName.split('.').pop()?.toLowerCase();
-  const mimeTypes = {
-    'txt': 'text/plain',
-    'pdf': 'application/pdf',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'gif': 'image/gif',
-    'mp4': 'video/mp4',
-    'mp3': 'audio/mpeg',
-    'zip': 'application/zip',
-    'json': 'application/json',
-    'js': 'application/javascript',
-    'css': 'text/css',
-    'html': 'text/html'
-  };
-  return mimeTypes[ext] || 'application/octet-stream';
-};
-
-// 递归处理 Tauri 文件夹
-const processTauriDirectory = async (dirPath, files, baseName = '') => {
-  try {
-    const { readDir, readFile, stat } = await import('@tauri-apps/plugin-fs');
-    const { basename, join } = await import('@tauri-apps/api/path');
-    
-    const entries = await readDir(dirPath);
-    
-    if (entries.length === 0) {
-      // 空文件夹，创建占位符
-      const emptyFolderPlaceholder = {
-        name: '.folder_placeholder',
-        size: 0,
-        type: 'application/x-empty-folder',
-        webkitRelativePath: baseName + '/.folder_placeholder',
-        isEmptyFolderPlaceholder: true,
-        folderPath: baseName
-      };
-      files.push(emptyFolderPlaceholder);
-      return;
-    }
-    
-    for (const entry of entries) {
-      const entryPath = await join(dirPath, entry.name);
-      const entryMetadata = await stat(entryPath);
+      console.log(`📊 拖拽处理结果: ${files.length} 个文件, 包含文件夹: ${hasDirectories}, 包含文件: ${hasFiles}`);
       
-      if (entryMetadata.isFile) {
-        try {
-          const fileContent = await readFile(entryPath);
-          const file = new File([fileContent], entry.name, {
-            type: getMimeType(entry.name),
-            lastModified: entryMetadata.modifiedAt?.getTime() || Date.now()
-          });
-          
-          // 设置相对路径
-          const relativePath = baseName ? `${baseName}/${entry.name}` : entry.name;
-          Object.defineProperty(file, 'webkitRelativePath', {
-            value: relativePath,
-            writable: false
-          });
-          
-          files.push(file);
-        } catch (error) {
-          console.error(`Error reading file ${entryPath}:`, error);
-        }
-      } else if (entryMetadata.isDirectory) {
-        // 递归处理子文件夹
-        const subDirName = baseName ? `${baseName}/${entry.name}` : entry.name;
-        await processTauriDirectory(entryPath, files, subDirName);
+      // 为文件添加拖拽标记
+      const draggedFiles = files.map(file => {
+        file.isDragFile = true;
+        return file;
+      });
+      
+      // 设置文件类型标志
+      if (hasDirectories && !hasFiles) {
+        isFolder.value = true;
+        isFile.value = false;
+        console.log('📁 检测到纯文件夹拖拽');
+      } else if (hasFiles && !hasDirectories) {
+        isFile.value = true;
+        isFolder.value = false;
+        console.log('📄 检测到纯文件拖拽');
+      } else if (hasDirectories && hasFiles) {
+        isFolder.value = true;
+        isFile.value = false;
+        console.log('📁📄 检测到混合内容拖拽');
+      } else {
+        isFile.value = true;
+        isFolder.value = false;
       }
+      
+      // 添加文件到列表
+      addFiles(draggedFiles);
+      
+      // 显示成功提示
+      if (hasDirectories && hasFiles) {
+        ElMessage.success(`成功添加 ${files.length} 个项目到上传列表（包含文件和文件夹）`);
+      } else if (hasDirectories) {
+        ElMessage.success(`成功添加文件夹内容到上传列表，共 ${files.length} 个项目`);
+      } else {
+        ElMessage.success(`成功添加 ${files.length} 个文件到上传列表`);
+      }
+    } else {
+      console.warn('⚠️ 没有获取到任何文件');
+      ElMessage.warning('没有检测到可上传的文件');
     }
   } catch (error) {
-    console.error(`Error processing directory ${dirPath}:`, error);
+    console.error('回退拖拽处理失败:', error);
+    ElMessage.error('文件拖拽处理失败，请重试');
   }
 };
+
+// 处理浏览器环境下的文件/文件夹条目（回退方式）
+const processFallbackBrowserEntry = async (entry, files, path = '') => {
+  try {
+    if (entry.isFile) {
+      // 处理文件
+      return new Promise((resolve, reject) => {
+        entry.file((file) => {
+          try {
+            // 设置文件的相对路径
+            const relativePath = path ? `${path}/${file.name}` : file.name;
+            Object.defineProperty(file, 'webkitRelativePath', {
+              value: relativePath,
+              writable: false
+            });
+            
+            files.push(file);
+            console.log(`📄 添加文件: ${relativePath}`);
+            resolve();
+          } catch (error) {
+            console.error('处理文件时出错:', error);
+            reject(error);
+          }
+        }, (error) => {
+          console.error('读取文件失败:', error);
+          reject(error);
+        });
+      });
+    } else if (entry.isDirectory) {
+      // 处理文件夹
+      const dirPath = path ? `${path}/${entry.name}` : entry.name;
+      console.log(`📁 处理文件夹: ${dirPath}`);
+      
+      return new Promise((resolve, reject) => {
+        const dirReader = entry.createReader();
+        const readEntries = async () => {
+          try {
+            dirReader.readEntries(async (entries) => {
+              try {
+                if (entries.length === 0) {
+                  // 空文件夹，创建占位符
+                  console.log(`📁 创建空文件夹占位符: ${dirPath}`);
+                  const emptyFolderFile = new File([], '.gitkeep', {
+                    type: 'text/plain',
+                    lastModified: Date.now()
+                  });
+                  Object.defineProperty(emptyFolderFile, 'webkitRelativePath', {
+                    value: `${dirPath}/.gitkeep`,
+                    writable: false
+                  });
+                  Object.defineProperty(emptyFolderFile, 'isEmptyFolderPlaceholder', {
+                    value: true,
+                    writable: false
+                  });
+                  files.push(emptyFolderFile);
+                  resolve();
+                } else {
+                  // 递归处理文件夹内容
+                  const promises = entries.map(childEntry => 
+                    processFallbackBrowserEntry(childEntry, files, dirPath)
+                  );
+                  await Promise.all(promises);
+                  resolve();
+                }
+              } catch (error) {
+                console.error('处理文件夹内容时出错:', error);
+                reject(error);
+              }
+            }, (error) => {
+              console.error('读取文件夹失败:', error);
+              reject(error);
+            });
+          } catch (error) {
+            console.error('创建文件夹读取器失败:', error);
+            reject(error);
+          }
+        };
+        readEntries();
+      });
+    }
+  } catch (error) {
+    console.error('处理条目时出错:', error);
+    throw error;
+  }
+};
+
 const handleDragOver = (e) => {
   e.preventDefault();
   e.stopPropagation();
+  
+  const handler = dragEventHandlers.value?.dragover;
+  if (handler) {
+    handler(e);
+  }
+  // 回退处理：基本的拖拽悬停效果
 };
 
 const handleDragEnter = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  isDragging.value = true;
+  
+  const handler = dragEventHandlers.value?.dragenter;
+  if (handler) {
+    handler(e);
+  }
+  // 回退处理：基本的拖拽进入效果
 };
 
 const handleDragLeave = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  // 只有当离开整个拖拽区域时才设置为false
-  if (!e.currentTarget.contains(e.relatedTarget)) {
-    isDragging.value = false;
+  
+  const handler = dragEventHandlers.value?.dragleave;
+  if (handler) {
+    handler(e);
   }
-};
-
-// 递归处理文件夹结构
-const processEntry = async (entry, files, path = '') => {
-  return new Promise((resolve) => {
-    if (entry.isFile) {
-      // 处理文件
-      entry.file((file) => {
-        // 为文件添加相对路径信息
-        const relativePath = path ? `${path}/${file.name}` : file.name;
-        Object.defineProperty(file, 'webkitRelativePath', {
-          value: relativePath,
-          writable: false
-        });
-        files.push(file);
-        resolve();
-      });
-    } else if (entry.isDirectory) {
-      // 处理文件夹
-      const dirReader = entry.createReader();
-      const currentPath = path ? `${path}/${entry.name}` : entry.name;
-
-      dirReader.readEntries(async (entries) => {
-        // 如果文件夹为空，创建一个占位符来表示空文件夹
-        if (entries.length === 0) {
-          // 创建空文件夹占位符
-          const emptyFolderPlaceholder = {
-            name: '.folder_placeholder',
-            size: 0,
-            type: 'application/x-empty-folder',
-            webkitRelativePath: currentPath + '/.folder_placeholder',
-            isEmptyFolderPlaceholder: true,
-            folderPath: currentPath
-          };
-          files.push(emptyFolderPlaceholder);
-        } else {
-          // 处理文件夹中的内容
-          const promises = entries.map(childEntry =>
-            processEntry(childEntry, files, currentPath)
-          );
-          await Promise.all(promises);
-        }
-        resolve();
-      });
-    }
-  });
+  // 回退处理：基本的拖拽离开效果
 };
 
 // 删除文件
@@ -1402,47 +1502,15 @@ const runFileUploadsWithFiles = async (files) => {
 
     console.log(`文件来源分组: 空文件夹${emptyFolders.length}个, 文件夹文件${folderFiles.length}个, 单文件${singleFiles.length}个`);
 
-    // 在Tauri环境中，只使用Rust后端处理文件夹上传
+    // 统一处理所有文件：拖拽和按钮选择都走相同的上传逻辑
     const allFolderFiles = [...folderFiles, ...emptyFolders];
-    if (isTauri.value && allFolderFiles.length > 0) {
-      // 检查是否所有文件都来自同一个Tauri扫描的文件夹
-      const tauriFiles = allFolderFiles.filter(file => file.tauriFilePath);
-      if (tauriFiles.length === allFolderFiles.length && tauriFiles.length > 0) {
-        try {
-          // 获取原始文件夹路径（从第一个文件的路径推导）
-          const firstFilePath = tauriFiles[0].tauriFilePath;
-          const folderPath = firstFilePath.substring(0, firstFilePath.lastIndexOf('\\') || firstFilePath.lastIndexOf('/'));
-          
-          console.log('使用Tauri Rust后端上传文件夹:', folderPath);
-          
-          // 使用Rust后端上传整个文件夹
-          const tauriResult = await handleTauriFolderUpload(folderPath, allFolderFiles);
-          
-          if (tauriResult.success) {
-            // Rust上传成功，更新所有文件状态
-            allFolderFiles.forEach(file => {
-              const uploadItem = fileStore.uploadProgress.find(item =>
-                item.name === (file.webkitRelativePath || file.name)
-              );
-              if (uploadItem) {
-                uploadItem.status = 'completed';
-                uploadItem.progress = 100;
-              }
-            });
-            
-            ElMessage.success(`文件夹上传完成！成功上传 ${tauriResult.uploadedFiles} 个文件`);
-            return;
-          } else {
-            ElMessage.error('Rust文件夹上传失败');
-            return;
-          }
-        } catch (error) {
-          console.error('Tauri文件夹上传失败:', error);
-          ElMessage.error('Rust文件夹上传失败: ' + error.message);
-          return;
-        }
-      }
-    }
+    
+    console.log('统一文件上传处理:', {
+      folderFiles: folderFiles.length,
+      emptyFolders: emptyFolders.length,
+      singleFiles: singleFiles.length,
+      totalFiles: files.length
+    });
 
     // 创建上传任务队列
     const uploadTasks = [];
@@ -1904,28 +1972,22 @@ const preventDefault = (e) => {
 };
 
 onMounted(async () => {
-  // 初始化Tauri
-  await initTauri();
+  console.log('🚀 FileUploadDialog组件开始初始化');
   
-  // 设置Tauri文件拖拽事件监听器
-  if (isTauri.value && tauriEvent) {
-    try {
-      // 监听文件拖拽事件
-      tauriFileDropUnlisten = await tauriEvent.listen('tauri://file-drop', handleTauriFileDrop);
-      console.log('Tauri file drop listener registered');
-    } catch (error) {
-      console.error('Error setting up Tauri file drop listener:', error);
-    }
-  }
+  // 初始化新的拖拽处理器
+  await initDragHandler();
   
+  // 设置全局拖拽阻止事件
   window.addEventListener("dragover", preventDefault);
   window.addEventListener("drop", preventDefault);
+  
+  console.log('✅ FileUploadDialog组件初始化完成');
 });
 
 onUnmounted(() => {
-  // 清理Tauri事件监听器
-  if (tauriFileDropUnlisten) {
-    tauriFileDropUnlisten();
+  // 销毁拖拽处理器
+  if (dragHandler) {
+    dragHandler.destroy();
   }
 
   window.removeEventListener("dragover", preventDefault);
@@ -1994,6 +2056,18 @@ onUnmounted(() => {
         >
           Rust文件夹选择
         </el-button>
+        
+        <!-- Tauri调试测试按钮 -->
+        <el-button 
+          v-if="isTauri" 
+          type="warning" 
+          plain 
+          :icon="InfoFilled" 
+          size="small"
+          @click="testTauriDragFunction"
+        >
+          测试拖拽功能
+        </el-button>
 
         <el-button
           v-if="fileList.length > 0"
@@ -2053,7 +2127,7 @@ onUnmounted(() => {
 
         <!-- 待上传文件列表 -->
         <div v-if="fileList.length > 0 && !isUploading" class="pending-section">
-          <PendingFileList
+          <FolderStructureList
             :file-list="fileList"
             @remove-file="handleRemove"
             @clear-all="handleClear"

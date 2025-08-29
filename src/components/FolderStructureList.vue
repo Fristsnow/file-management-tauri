@@ -1,9 +1,9 @@
 <template>
-  <div class="pending-file-list">
+  <div class="folder-structure-list">
     <div class="list-header">
       <div class="header-title">
         <el-icon><Document /></el-icon>
-        <span>待上传文件 ({{ fileList.length }})</span>
+        <span>待上传文件 ({{ fileList.length }} 个文件)</span>
       </div>
       <div class="header-actions">
         <el-button
@@ -38,7 +38,7 @@
         >
           <div class="file-info">
             <div class="file-icon">
-              <el-icon v-if="isFolder(item.file)" color="#409eff">
+              <el-icon v-if="item.file.isEmptyFolderPlaceholder" color="#409eff">
                 <Folder />
               </el-icon>
               <el-icon v-else-if="isImage(item.file)" color="#67c23a">
@@ -55,8 +55,8 @@
               </el-icon>
             </div>
             <div class="file-details">
-              <div class="file-name" :title="getFileName(item.file)">
-                {{ getFileName(item.file) }}
+              <div class="file-name" :title="getDisplayFileName(item.file)">
+                {{ getDisplayFileName(item.file) }}
               </div>
               <div class="file-meta">
                 <span class="file-size">{{ formatFileSize(item.file.size) }}</span>
@@ -84,7 +84,7 @@
     <!-- 统计信息 -->
     <div class="list-footer" v-if="fileList.length > 0">
       <div class="stats">
-        <span>总计: {{ fileList.length }} 个文件</span>
+        <span>总计: {{ totalFiles }} 个文件</span>
         <span>大小: {{ formatFileSize(totalSize) }}</span>
       </div>
     </div>
@@ -113,45 +113,86 @@ const emit = defineEmits(['remove-file', 'clear-all'])
 // 虚拟滚动相关
 const containerRef = ref(null)
 const itemHeight = 60 // 每个文件项的高度
-const containerHeight = 300 // 容器高度
+const containerHeight = ref(400) // 容器高度
 const scrollTop = ref(0)
-const visibleCount = Math.ceil(containerHeight / itemHeight) + 2 // 可见项数量 + 缓冲
+const visibleCount = computed(() => Math.ceil(containerHeight.value / itemHeight) + 2)
 
-// 计算总高度
-const totalHeight = computed(() => props.fileList.length * itemHeight)
-
-// 计算可见项
-const visibleItems = computed(() => {
-  const startIndex = Math.floor(scrollTop.value / itemHeight)
-  const endIndex = Math.min(startIndex + visibleCount, props.fileList.length)
-
-  const items = []
-  for (let i = startIndex; i < endIndex; i++) {
-    items.push({
-      index: i,
-      file: props.fileList[i],
-      top: i * itemHeight
-    })
-  }
-  return items
+// 所有文件的扁平化列表
+const allFiles = computed(() => {
+  return props.fileList.map((file, index) => ({
+    file,
+    index
+  }))
 })
 
-// 计算总大小
+// 总高度
+const totalHeight = computed(() => allFiles.value.length * itemHeight)
+
+// 可见项目
+const visibleItems = computed(() => {
+  const startIndex = Math.floor(scrollTop.value / itemHeight)
+  const endIndex = Math.min(startIndex + visibleCount.value, allFiles.value.length)
+  
+  return allFiles.value.slice(startIndex, endIndex).map((item, i) => ({
+    ...item,
+    top: (startIndex + i) * itemHeight
+  }))
+})
+
+// 滚动处理
+const handleScroll = (event) => {
+  scrollTop.value = event.target.scrollTop
+}
+
+// 组件挂载时设置滚动监听
+onMounted(async () => {
+  await nextTick()
+  if (containerRef.value) {
+    containerRef.value.addEventListener('scroll', handleScroll)
+    // 设置容器高度
+    const rect = containerRef.value.getBoundingClientRect()
+    containerHeight.value = Math.min(400, window.innerHeight - rect.top - 100)
+  }
+})
+
+// 组件卸载时移除监听
+onUnmounted(() => {
+  if (containerRef.value) {
+    containerRef.value.removeEventListener('scroll', handleScroll)
+  }
+})
+
+// 获取显示的文件名
+const getDisplayFileName = (file) => {
+  if (!file) return '未知文件'
+  if (file.isEmptyFolderPlaceholder) return '空文件夹'
+  if (!file.name || typeof file.name !== 'string') return '未命名文件'
+  return file.name
+}
+
+// 获取显示的路径
+const getDisplayPath = (file) => {
+  if (!file) return ''
+  if (file.isEmptyFolderPlaceholder) {
+    return file.folderPath || ''
+  }
+  if (file.webkitRelativePath) {
+    return file.webkitRelativePath
+  }
+  return '根目录'
+}
+
+
+
+// 总文件数
+const totalFiles = computed(() => props.fileList.length)
+
+// 总大小
 const totalSize = computed(() => {
   return props.fileList.reduce((total, file) => total + (file.size || 0), 0)
 })
 
-// 滚动事件处理
-const handleScroll = (e) => {
-  scrollTop.value = e.target.scrollTop
-}
-
 // 文件类型判断
-const isFolder = (file) => {
-  // 检查是否为空文件夹占位符
-  return file.isEmptyFolderPlaceholder || false
-}
-
 const isImage = (file) => {
   const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']
   const ext = getFileExtension(file.name)
@@ -172,59 +213,35 @@ const isAudio = (file) => {
 
 // 获取文件扩展名
 const getFileExtension = (filename) => {
+  if (!filename || typeof filename !== 'string') {
+    return ''
+  }
   return filename.split('.').pop() || ''
 }
 
 // 获取文件名
 const getFileName = (file) => {
+  if (!file) {
+    return '未知文件'
+  }
   if (file.isEmptyFolderPlaceholder) {
-    return `📁 ${file.folderPath}/` // 空文件夹显示
+    return `📁 空文件夹`
   }
-  return file.webkitRelativePath || file.name
-}
-
-// 获取文件显示路径
-const getDisplayPath = (file) => {
-  if (file.isEmptyFolderPlaceholder) {
-    return '空文件夹'
-  }
-  if (file.webkitRelativePath) {
-    const pathParts = file.webkitRelativePath.split('/')
-    if (pathParts.length > 1) {
-      return pathParts.slice(0, -1).join('/') + '/'
-    }
-  }
-  return '根目录'
+  return file.name || '未命名文件'
 }
 
 // 格式化文件大小
 const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 B'
+  if (!bytes || bytes === 0) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
-
-// 组件挂载后设置滚动监听
-onMounted(() => {
-  nextTick(() => {
-    if (containerRef.value) {
-      containerRef.value.addEventListener('scroll', handleScroll)
-    }
-  })
-})
-
-// 组件卸载前清理监听
-onUnmounted(() => {
-  if (containerRef.value) {
-    containerRef.value.removeEventListener('scroll', handleScroll)
-  }
-})
 </script>
 
 <style scoped>
-.pending-file-list {
+.folder-structure-list {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-primary);
@@ -248,14 +265,20 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .virtual-list-container {
-  height: 300px;
+  height: 400px;
   overflow-y: auto;
   position: relative;
 }
 
 .virtual-list-content {
   position: relative;
+  width: 100%;
 }
 
 .file-item {
@@ -264,7 +287,9 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-light);
+  background: var(--bg-primary);
   transition: background-color 0.2s;
+  box-sizing: border-box;
 }
 
 .file-item:hover {
@@ -281,10 +306,15 @@ onUnmounted(() => {
 
 .file-icon {
   flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .file-details {
-  //flex: 1;
+  flex: 1;
   min-width: 0;
 }
 
@@ -294,28 +324,35 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
+  font-weight: 500;
 }
 
 .file-meta {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   font-size: 12px;
   color: var(--text-tertiary);
+  align-items: center;
 }
 
 .file-size {
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .file-path {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+  max-width: 300px;
 }
 
 .file-actions {
   flex-shrink: 0;
+  margin-left: 12px;
 }
 
 .list-footer {
@@ -338,6 +375,7 @@ onUnmounted(() => {
 
 .virtual-list-container::-webkit-scrollbar-track {
   background: var(--bg-tertiary);
+  border-radius: 3px;
 }
 
 .virtual-list-container::-webkit-scrollbar-thumb {
