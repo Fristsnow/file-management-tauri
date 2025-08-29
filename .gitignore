@@ -16,6 +16,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.github
 .DS_Store
 .trae
 *.suo
@@ -23,3 +24,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+src-tauri/target
+vue-file-management.key
+vue-file-management.key.pub
+hhhh.html
+tauri-test.md
+test-empty-file.txt
+pnpm-lock.yaml
+dasd.txt
+DEPLOYMENT.md
