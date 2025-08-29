@@ -45,6 +45,7 @@
         :current-folder-id="getCurrentFolderId()"
         :default-files="dragFiles"
         @confirm="handleUploadConfirm"
+        @upload-complete="handleUploadComplete"
     />
 
     <!-- 下载对话框 -->
@@ -413,6 +414,12 @@ const handleUploadConfirm = async () => {
   dragFiles.value = [];
 
   await refreshCurrentFolder();
+};
+
+// 处理上传完成事件
+const handleUploadComplete = async () => {
+  await refreshCurrentFolder();
+  showUploadDialog.value = false;
 };
 
 const handleDownload = (file) => {

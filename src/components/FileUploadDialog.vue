@@ -86,6 +86,8 @@ const handleDragFolderUpload = async (folderPath, files) => {
 
     if (uploadResult.success) {
       ElMessage.success(`拖拽文件夹上传完成！${uploadResult.message}`);
+      // 触发上传完成事件，通知父组件刷新文件列表
+      emit('upload-complete');
       return {
         success: true,
         uploadedFiles: uploadResult.uploaded_files,
@@ -149,7 +151,7 @@ const props = defineProps({
   defaultFiles: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(["update:modelValue", "confirm"]);
+const emit = defineEmits(["update:modelValue", "confirm", "upload-complete"]);
 
 // 创建计算属性来处理对话框的显示状态
 const dialogVisible = computed({
@@ -1055,6 +1057,8 @@ const handleTauriFolderUpload = async (folderPath, files) => {
 
     if (uploadResult.success) {
       ElMessage.success(uploadResult.message);
+      // 触发上传完成事件，通知父组件刷新文件列表
+      emit('upload-complete');
       return {
         success: true,
         uploadedFiles: uploadResult.uploaded_files,
@@ -1451,6 +1455,8 @@ const handleSmartFolderUpload = async (files) => {
         });
 
         ElMessage.success(`文件夹 "${folderName}" 批量上传完成 (${folderFiles.length}个文件)`);
+        // 触发上传完成事件，通知父组件刷新文件列表
+        emit('upload-complete');
 
       } catch (error) {
         // 批量上传失败，将文件加入剩余文件列表，使用传统方式上传
@@ -1565,6 +1571,9 @@ const runFileUploadsWithFiles = async (files) => {
     // 等待所有分组上传完成
     await Promise.all(uploadTasks);
     ElMessage.success('所有文件上传完成!');
+    
+    // 触发上传完成事件，通知父组件刷新文件列表
+    emit('upload-complete');
 
   } catch (error) {
     ElMessage.error('批量上传过程中出现错误');

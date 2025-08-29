@@ -438,7 +438,7 @@ const toggleFullscreen = () => {
 
 /* 下半部分：进度监控区域 */
 .lower-section {
-  height: 200px;
+  height: 300px;
   background: #fff;
   border-top: 1px solid #e5e7eb;
   box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.04);
