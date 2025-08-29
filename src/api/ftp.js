@@ -1,14 +1,28 @@
 import request, { upload } from '@/utils/request.js';
 import {ElMessage} from "element-plus";
 
-export const getFtpFileApi = (prefix) => {
+/**
+ * 获取用户的工作空间
+ * @returns {*}
+ */
+export const getUserWorderApi = () => {
+    return request({
+        method: 'GET',
+        url: 'minios/selectByUserFolder',
+        params: {
+            bucketName: 'public'
+        }
+    })
+}
+
+export const getFtpFileApi = (prefix, projectId) => {
     return request({
         method: 'GET',
         url: '/minios/listFilesAndFolders',
         params: {
             bucketName: "public",
             prefix: prefix,
-            projectld: 6
+            projectId: projectId
         }
     });
 }
@@ -409,13 +423,14 @@ export const folderDeleteApi = (id, folderName) => {
 }
 
 // 小文件直接上传 - 使用与HTML文件相同的接口
-export const uploadSmallFileApi = (file, bucketName = 'public', objectName = file.name, id,  overwrite = false) => {
+export const uploadSmallFileApi = (file, bucketName = 'public', objectName = file.name, id,  overwrite = false, projectId) => {
     const formData = new FormData();
     formData.append('bucketName', bucketName);
     formData.append('file', file);
     formData.append('objectName', objectName); // 使用完整的对象路径（包含文件名）
     formData.append('id', id);
     formData.append('overwrite', overwrite.toString());
+    formData.append('projectId', projectId);
 
     return upload('/file/upload', formData);
 };
@@ -428,11 +443,13 @@ export const uploadSmallFileApi = (file, bucketName = 'public', objectName = fil
  * @param {string} bucketName - MinIO存储桶名称
  * @returns {Promise} 上传结果
  */
-export const uploadFolderApi = (files, objectNames, originalFileNames, bucketName = 'public') => {
+export const uploadFolderApi = (files, objectNames, originalFileNames, bucketName = 'public', projectId) => {
     const formData = new FormData();
 
     // 添加存储桶名称
     formData.append('bucketName', bucketName);
+
+    formData.append('projectId', projectId)
 
     // 添加所有文件
     files.forEach(file => {
@@ -460,18 +477,18 @@ export const uploadSingleFileApi = (file, options = {}) => {
         onProgress = () => {},
         onUploadIdReady = () => {},
         currentPath = '/',
-        overwrite = false
+        overwrite = false,
+        projectId
     } = options;
 
-    // 直接使用传入的objectName，不再重复构建路径
-    // 路径构建应该在调用方完成，避免重复处理
     return uploadFtpFileApi(file, {
         bucketName,
         objectName,
         onProgress,
         onUploadIdReady,
         currentPath,
-        overwrite
+        overwrite,
+        projectId
     });
 };
 
@@ -507,7 +524,8 @@ export const completeMultipartUploadApi = (data) => {
         data: {
             bucketName: data.bucketName,
             objectName: data.objectName,
-            uploadId: data.uploadId
+            uploadId: data.uploadId,
+            projectId: data.projectId
         }
     });
 };
@@ -536,7 +554,8 @@ export const uploadFtpFileApi = (file, options = {}) => {
         onUploadIdReady = () => {},
         minChunkSize = 5 * 1024 * 1024, // 5MB
         currentPath = '/',
-        overwrite = false
+        overwrite = false,
+        projectId
     } = options;
 
     // 直接使用大文件分片上传，不再判断文件大小
@@ -548,13 +567,14 @@ export const uploadFtpFileApi = (file, options = {}) => {
         onUploadIdReady,
         minChunkSize,
         currentPath,
-        overwrite
+        overwrite,
+        projectId
     });
 };
 
 // 大文件分片上传实现
 const uploadLargeFile = async (file, options) => {
-    const { bucketName, objectName, onProgress, onUploadIdReady, minChunkSize, currentPath = '/', overwrite = false } = options;
+    const { bucketName, objectName, onProgress, onUploadIdReady, minChunkSize, currentPath = '/', overwrite = false, projectId } = options;
     const chunkSize = await getDynamicChunkSize(file.size);
     const totalChunks = Math.ceil(file.size / chunkSize);
     const fileId = generateFileId(file, objectName);
@@ -579,7 +599,8 @@ const uploadLargeFile = async (file, options) => {
                 fileSize: file.size,
                 originalFileName: file.name,
                 currentPath: currentPath,
-                overwrite: overwrite
+                overwrite: overwrite,
+                projectId: projectId
             });
 
             uploadId = initResult.uploadId || initResult.data?.uploadId;
@@ -761,6 +782,7 @@ const uploadLargeFile = async (file, options) => {
                 formData.append('bucketName', bucketName);
                 formData.append('objectName', objectName);
                 formData.append('uploadId', uploadId);
+                formData.append('projectId', projectId)
                 formData.append('partNumber', task.partNumber);
                 formData.append('file', task.chunk);
 
@@ -843,6 +865,7 @@ const uploadLargeFile = async (file, options) => {
             bucketName,
             objectName,
             uploadId,
+            projectId,
             originalFileName: file.name,
             fileSize: file.size
         });
@@ -1131,7 +1154,7 @@ const getDynamicConcurrency = (fileSize) => {
     return finalConcurrency;
 };
 
-// 断点续传：保存上传进度到本地存储（已禁用历史记录保存）
+// 断点续传：保存上传进度到本地存储（已禁用历史记录保存）,
 const saveUploadProgress = (fileId, uploadId, completedParts) => {
     // 不再保存上传进度到本地存储
     // const progressKey = `upload_progress_${fileId}`;
@@ -1173,109 +1196,111 @@ const generateFileId = (file, objectName) => {
 };
 
 // 多文件智能并发上传管理 - 参考 hhhh.html 的实现
-export const uploadMultipleFiles = async (files, options = {}) => {
-    const {
-        bucketName = 'public',
-        currentPath = '/',
-        onProgress = () => {},
-        onFileComplete = () => {},
-        onAllComplete = () => {},
-        overwrite = false
-    } = options;
-
-    const MB = 1024 * 1024;
-    const GB = 1024 * MB;
-
-    // 按文件大小分组
-    const smallFiles = files.filter(file => file.size < 50 * MB); // 50MB以下
-    const mediumFiles = files.filter(file => file.size >= 50 * MB && file.size < 1 * GB); // 50MB-1GB
-    const largeFiles = files.filter(file => file.size >= 1 * GB && file.size < 3 * GB); // 1GB-3GB
-    const extraLargeFiles = files.filter(file => file.size >= 3 * GB); // 3GB以上
-
-    console.log(`文件分组统计: 小文件${smallFiles.length}个, 中等文件${mediumFiles.length}个, 大文件${largeFiles.length}个, 超大文件${extraLargeFiles.length}个`);
-
-    // 创建上传任务队列
-    const uploadTasks = [];
-
-    // 小文件并发上传（3个并发）
-    if (smallFiles.length > 0) {
-        uploadTasks.push(uploadFileGroup(smallFiles, 3, 'small', { bucketName, currentPath, onProgress, onFileComplete, overwrite }));
-    }
-
-    // 中等文件并发上传（3个并发）
-    if (mediumFiles.length > 0) {
-        uploadTasks.push(uploadFileGroup(mediumFiles, 3, 'medium', { bucketName, currentPath, onProgress, onFileComplete, overwrite }));
-    }
-
-    // 大文件并发上传（2个并发）
-    if (largeFiles.length > 0) {
-        uploadTasks.push(uploadFileGroup(largeFiles, 2, 'large', { bucketName, currentPath, onProgress, onFileComplete, overwrite }));
-    }
-
-    // 超大文件串行上传（1个并发）
-    if (extraLargeFiles.length > 0) {
-        uploadTasks.push(uploadFileGroup(extraLargeFiles, 1, 'extraLarge', { bucketName, currentPath, onProgress, onFileComplete, overwrite }));
-    }
-
-    try {
-        // 等待所有分组上传完成
-        await Promise.all(uploadTasks);
-        onAllComplete();
-        console.log('所有文件上传完成');
-    } catch (error) {
-        console.error('多文件上传过程中出现错误:', error);
-        throw error;
-    }
-};
+// export const uploadMultipleFiles = async (files, options = {}) => {
+//     const {
+//         bucketName = 'public',
+//         currentPath = '/',
+//         onProgress = () => {},
+//         onFileComplete = () => {},
+//         onAllComplete = () => {},
+//         overwrite = false,
+//         projectId
+//     } = options;
+//
+//     const MB = 1024 * 1024;
+//     const GB = 1024 * MB;
+//
+//     // 按文件大小分组
+//     const smallFiles = files.filter(file => file.size < 50 * MB); // 50MB以下
+//     const mediumFiles = files.filter(file => file.size >= 50 * MB && file.size < 1 * GB); // 50MB-1GB
+//     const largeFiles = files.filter(file => file.size >= 1 * GB && file.size < 3 * GB); // 1GB-3GB
+//     const extraLargeFiles = files.filter(file => file.size >= 3 * GB); // 3GB以上
+//
+//     console.log(`文件分组统计: 小文件${smallFiles.length}个, 中等文件${mediumFiles.length}个, 大文件${largeFiles.length}个, 超大文件${extraLargeFiles.length}个`);
+//
+//     // 创建上传任务队列
+//     const uploadTasks = [];
+//
+//     // 小文件并发上传（3个并发）
+//     if (smallFiles.length > 0) {
+//         uploadTasks.push(uploadFileGroup(smallFiles, 3, 'small', { bucketName, currentPath, onProgress, onFileComplete, overwrite, projectId }));
+//     }
+//
+//     // 中等文件并发上传（3个并发）
+//     if (mediumFiles.length > 0) {
+//         uploadTasks.push(uploadFileGroup(mediumFiles, 3, 'medium', { bucketName, currentPath, onProgress, onFileComplete, overwrite, projectId }));
+//     }
+//
+//     // 大文件并发上传（2个并发）
+//     if (largeFiles.length > 0) {
+//         uploadTasks.push(uploadFileGroup(largeFiles, 2, 'large', { bucketName, currentPath, onProgress, onFileComplete, overwrite, projectId }));
+//     }
+//
+//     // 超大文件串行上传（1个并发）
+//     if (extraLargeFiles.length > 0) {
+//         uploadTasks.push(uploadFileGroup(extraLargeFiles, 1, 'extraLarge', { bucketName, currentPath, onProgress, onFileComplete, overwrite, projectId }));
+//     }
+//
+//     try {
+//         // 等待所有分组上传完成
+//         await Promise.all(uploadTasks);
+//         onAllComplete();
+//         console.log('所有文件上传完成');
+//     } catch (error) {
+//         console.error('多文件上传过程中出现错误:', error);
+//         throw error;
+//     }
+// };
 
 // 分组上传文件 - 参考 hhhh.html 的并发实现
-const uploadFileGroup = async (files, concurrency, groupType, options) => {
-    const { bucketName, currentPath, onProgress, onFileComplete, overwrite = false } = options;
-
-    console.log(`开始上传${groupType}文件组: ${files.length}个文件，并发数: ${concurrency}`);
-
-    let fileIndex = 0;
-
-    const worker = async () => {
-        while (fileIndex < files.length) {
-            const file = files[fileIndex++];
-            try {
-                // 直接使用文件的路径信息，不再重复构建
-                // 路径构建已在调用方（FileUploadDialog.vue）完成
-                const objectName = file.webkitRelativePath || file.name;
-
-                console.log(`开始上传文件: ${objectName} (${formatFileSize(file.size)})`);
-
-                // 使用现有的上传API
-                await uploadFtpFileApi(file, {
-                    bucketName,
-                    objectName,
-                    onProgress: (progress, uploadedChunks, totalChunks) => {
-                        onProgress(file, progress, uploadedChunks, totalChunks);
-                    },
-                    overwrite
-                });
-
-                console.log(`文件上传完成: ${objectName}`);
-                onFileComplete(file, 'success');
-
-            } catch (error) {
-                console.error(`文件上传失败: ${file.name}`, error);
-                onFileComplete(file, 'error', error);
-                throw error;
-            }
-        }
-    };
-
-    // 创建指定数量的并发工作器
-    const workers = [];
-    for (let i = 0; i < concurrency; i++) {
-        workers.push(worker());
-    }
-
-    await Promise.all(workers);
-    console.log(`${groupType}文件组上传完成`);
-};
+// const uploadFileGroup = async (files, concurrency, groupType, options) => {
+//     const { bucketName, currentPath, onProgress, onFileComplete, overwrite = false, projectId } = options;
+//
+//     console.log(`开始上传${groupType}文件组: ${files.length}个文件，并发数: ${concurrency}`);
+//
+//     let fileIndex = 0;
+//
+//     const worker = async () => {
+//         while (fileIndex < files.length) {
+//             const file = files[fileIndex++];
+//             try {
+//                 // 直接使用文件的路径信息，不再重复构建
+//                 // 路径构建已在调用方（FileUploadDialog.vue）完成
+//                 const objectName = file.webkitRelativePath || file.name;
+//
+//                 console.log(`开始上传文件: ${objectName} (${formatFileSize(file.size)})`);
+//
+//                 // 使用现有的上传API
+//                 await uploadFtpFileApi(file, {
+//                     bucketName,
+//                     objectName,
+//                     onProgress: (progress, uploadedChunks, totalChunks) => {
+//                         onProgress(file, progress, uploadedChunks, totalChunks);
+//                     },
+//                     overwrite,
+//                     projectId
+//                 });
+//
+//                 console.log(`文件上传完成: ${objectName}`);
+//                 onFileComplete(file, 'success');
+//
+//             } catch (error) {
+//                 console.error(`文件上传失败: ${file.name}`, error);
+//                 onFileComplete(file, 'error', error);
+//                 throw error;
+//             }
+//         }
+//     };
+//
+//     // 创建指定数量的并发工作器
+//     const workers = [];
+//     for (let i = 0; i < concurrency; i++) {
+//         workers.push(worker());
+//     }
+//
+//     await Promise.all(workers);
+//     console.log(`${groupType}文件组上传完成`);
+// };
 
 // 格式化文件大小
 const formatFileSize = (bytes) => {

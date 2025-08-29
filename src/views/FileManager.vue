@@ -5,12 +5,18 @@
       <!-- 面包屑导航 -->
       <Breadcrumb
           :current-folder="fileStore.currentFolder"
+          :current-project="fileStore.currentProject"
           @navigate="navigateToPath"
           @refresh="refreshCurrentFolder"
-      />
+        />
 
       <!-- 功能区 -->
       <div class="toolbar">
+        <!-- 工作空间选择器 -->
+        <WorkspaceSelector @project-changed="handleProjectChange" />
+        
+        <div class="toolbar-divider"></div>
+        
         <el-button
             type="info"
             size="small"
@@ -65,12 +71,14 @@ import {
   getFtpFileApi,
   fileDeleteApi,
   folderDeleteApi,
-  createFolderApi
+  createFolderApi,
+  getUserWorderApi
 } from '@/api/ftp.js';
 import FileList from '@/components/FileList.vue';
 import Breadcrumb from '@/components/Breadcrumb.vue';
 import FileUploadDialog from '@/components/FileUploadDialog.vue';
 import FileDownloadDialog from '@/components/FileDownloadDialog.vue';
+import WorkspaceSelector from '@/components/WorkspaceSelector.vue';
 
 const fileStore = useFileStore();
 const fileTreeRef = ref(null);
@@ -110,7 +118,7 @@ const loadFolderData = async (folderId) => {
   try {
     const targetId = folderId === 0 || folderId === '0' ? '0' : folderId.toString();
     console.log('发起API请求:', targetId);
-    const res = await getFtpFileApi(targetId);
+    const res = await getFtpFileApi(targetId, fileStore.currentProjectId);
     console.log('API响应:', res);
 
     const data = res.data || [];
@@ -253,82 +261,118 @@ const loadFolder = async (folderPath, folderId = null) => {
 // 路径导航
 const navigateToPath = async (targetPath) => {
   try {
-    if (targetPath === '/') {
-      await loadFolder('/', 0);
+    const pathParts = targetPath.split('/').filter(part => part);
+    
+    // 如果没有路径部分或者是当前项目的根目录
+    if (pathParts.length === 0 || (pathParts.length === 1 && fileStore.currentProject && pathParts[0] === fileStore.currentProject.originalFileName)) {
+      // 导航到当前项目的根目录
+      if (fileStore.currentProject) {
+        const projectPath = `/${fileStore.currentProject.originalFileName}`;
+        const {fileListData} = await loadFolderData('0');
+        fileStore.setFileList(fileListData);
+        fileStore.setCurrentFolder(projectPath);
+        setCurrentFolderIdCache(projectPath, 0);
+      }
       return;
     }
 
-    const pathParts = targetPath.split('/').filter(part => part);
+    // 确保路径是当前项目的子路径
+    if (!fileStore.currentProject || pathParts[0] !== fileStore.currentProject.originalFileName) {
+      console.error('路径不属于当前项目:', targetPath);
+      return;
+    }
+    
+    // 导航到项目内的子文件夹
     let currentId = 0;
-
-    for (const part of pathParts) {
+    for (let i = 1; i < pathParts.length; i++) {
+      const part = pathParts[i];
       const {rawData} = await loadFolderData(currentId.toString());
       const folders = rawData.filter(item => item.isDir === 1);
 
       const targetFolder = folders.find(folder => folder.originalFileName === part);
       if (!targetFolder) {
         console.error('找不到文件夹:', part);
-        await loadFolder('/', 0);
+        // 回退到项目根目录
+        const projectPath = `/${fileStore.currentProject.originalFileName}`;
+        const {fileListData} = await loadFolderData('0');
+        fileStore.setFileList(fileListData);
+        fileStore.setCurrentFolder(projectPath);
+        setCurrentFolderIdCache(projectPath, 0);
         return;
       }
 
       currentId = targetFolder.id;
     }
-
+    
     const {fileListData} = await loadFolderData(currentId.toString());
     fileStore.setFileList(fileListData);
     fileStore.setCurrentFolder(targetPath);
     setCurrentFolderIdCache(targetPath, currentId);
 
-    const initialTreeData = [{
-      originalFileName: '根目录',
-      id: 0,
-      parentId: null,
-      minioObjectName: '/',
-      fileType: 'folder',
-      isFolder: true,
-      isLeaf: false
-    }];
-    fileStore.setTreeData(initialTreeData);
   } catch (error) {
     console.error('路径导航失败:', error);
-    await loadFolder('/', 0);
+    // 回退到项目根目录
+    if (fileStore.currentProject) {
+      const projectPath = `/${fileStore.currentProject.originalFileName}`;
+      const {fileListData} = await loadFolderData('0');
+      fileStore.setFileList(fileListData);
+      fileStore.setCurrentFolder(projectPath);
+      setCurrentFolderIdCache(projectPath, 0);
+    }
   }
 };
 
 // 返回上级目录
 const goBack = async () => {
-  if (fileStore.currentFolder === '/') return;
-
+  if (!fileStore.currentProject) return;
+  
   const pathParts = fileStore.currentFolder.split('/').filter(part => part);
+  
+  // 如果已经在项目根目录，无法再返回
+  if (pathParts.length <= 1) return;
+  
   pathParts.pop();
-  const parentPath = pathParts.length > 0 ? '/' + pathParts.join('/') : '/';
+  const parentPath = '/' + pathParts.join('/');
+
+  // 检查父路径是否是项目根目录
+  if (pathParts.length === 1 && pathParts[0] === fileStore.currentProject.originalFileName) {
+    // 返回到项目根目录
+    const {fileListData} = await loadFolderData('0');
+    fileStore.setFileList(fileListData);
+    fileStore.setCurrentFolder(parentPath);
+    setCurrentFolderIdCache(parentPath, 0);
+    return;
+  }
 
   // 获取父级目录的ID
   let parentId = 0;
-  if (parentPath !== '/') {
-    // 通过路径查找父级目录ID
-    let currentId = 0;
-    const parentPathParts = parentPath.split('/').filter(part => part);
+  // 跳过项目名称部分，从第二个路径开始查找
+  const searchParts = pathParts.slice(1);
 
-    for (const part of parentPathParts) {
-      const {rawData} = await loadFolderData(currentId.toString());
-      const folders = rawData.filter(item => item.isDir === 1);
+  for (const part of searchParts) {
+    const {rawData} = await loadFolderData(parentId.toString());
+    const folders = rawData.filter(item => item.isDir === 1);
 
-      const targetFolder = folders.find(folder => folder.originalFileName === part);
-      if (!targetFolder) {
-        console.error('找不到父级文件夹:', part);
-        await loadFolder('/', 0);
-        return;
-      }
-
-      currentId = targetFolder.id;
+    const targetFolder = folders.find(folder => folder.originalFileName === part);
+    if (!targetFolder) {
+      console.error('找不到父级文件夹:', part);
+      // 回退到项目根目录
+      const projectPath = `/${fileStore.currentProject.originalFileName}`;
+      const {fileListData} = await loadFolderData('0');
+      fileStore.setFileList(fileListData);
+      fileStore.setCurrentFolder(projectPath);
+      setCurrentFolderIdCache(projectPath, 0);
+      return;
     }
-    parentId = currentId;
+
+    parentId = targetFolder.id;
   }
 
   // 加载父级目录内容
-  await loadFolder(parentPath, parentId);
+  const {fileListData} = await loadFolderData(parentId.toString());
+  fileStore.setFileList(fileListData);
+  fileStore.setCurrentFolder(parentPath);
+  setCurrentFolderIdCache(parentPath, parentId);
 
   // 选中左侧树的对应节点
   if (fileTreeRef.value && fileTreeRef.value.setCurrentKey) {
@@ -338,12 +382,13 @@ const goBack = async () => {
 
 // 进入文件夹
 const enterFolder = async (folder) => {
-  const newPath = fileStore.currentFolder === '/'
-      ? `/${folder.originalFileName}`
-      : `${fileStore.currentFolder}/${folder.originalFileName}`;
+  const newPath = `${fileStore.currentFolder}/${folder.originalFileName}`;
 
-  // 先加载新文件夹内容
-  await loadFolder(newPath, folder.id);
+  // 加载新文件夹内容
+  const {fileListData} = await loadFolderData(folder.id.toString());
+  fileStore.setFileList(fileListData);
+  fileStore.setCurrentFolder(newPath);
+  setCurrentFolderIdCache(newPath, folder.id);
 
   // 然后确保左侧树节点路径已加载并展开到目标节点
   if (folder && folder.id) {
@@ -420,6 +465,25 @@ const handleUploadConfirm = async () => {
 const handleUploadComplete = async () => {
   await refreshCurrentFolder();
   showUploadDialog.value = false;
+};
+
+// 处理项目切换
+const handleProjectChange = async (project) => {
+  try {
+    // 清空当前文件夹缓存
+    folderIdCache.value.clear();
+    
+    // 重置到根目录
+    fileStore.setCurrentFolder('/');
+    
+    // 重新加载根目录数据
+    await loadFolder('/', 0);
+    
+    console.log('已切换到项目:', project.originalFileName);
+  } catch (error) {
+    console.error('切换项目失败:', error);
+    ElMessage.error('切换工作空间失败');
+  }
 };
 
 const handleDownload = (file) => {
@@ -618,26 +682,34 @@ const refreshCurrentFolder = async () => {
 // 组件挂载时初始化
 onMounted(async () => {
   try {
-    const initialTreeData = [{
-      originalFileName: '根目录',
-      id: 0,
-      parentId: null,
-      minioObjectName: '/',
-      fileType: 'folder',
-      isFolder: true,
-      isLeaf: false
-    }];
-    fileStore.setTreeData(initialTreeData);
-
-    const currentPath = fileStore.currentFolder || '/';
-    if (currentPath === '/') {
-      await loadFolder('/', 0);
+    // 获取用户工作空间
+    const workspaceRes = await getUserWorderApi();
+    if (workspaceRes.code === 200 && workspaceRes.data && workspaceRes.data.length > 0) {
+      fileStore.setWorkspaceList(workspaceRes.data);
+      
+      // 默认选择第一个工作空间作为起始点
+      const firstWorkspace = workspaceRes.data[0];
+      fileStore.setCurrentProjectId(firstWorkspace.projectId);
+      fileStore.setCurrentProject(firstWorkspace);
+      
+      // 设置当前路径为第一个工作空间的路径
+      const workspacePath = `/${firstWorkspace.originalFileName}`;
+      fileStore.setCurrentFolder(workspacePath);
+      
+      // 加载第一个工作空间的内容
+      const {fileListData} = await loadFolderData(0); // 使用 0 作为项目根目录ID
+      fileStore.setFileList(fileListData);
+      
     } else {
-      await navigateToPath(currentPath);
+      // 如果没有工作空间数据，显示空列表
+      fileStore.setFileList([]);
+      fileStore.setCurrentFolder('/');
     }
   } catch (error) {
     console.error('初始化失败:', error);
-    await loadFolder('/', 0);
+    // 错误时显示空列表
+    fileStore.setFileList([]);
+    fileStore.setCurrentFolder('/');
   }
 });
 </script>
@@ -693,8 +765,16 @@ onMounted(async () => {
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
   display: flex;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #e8eaec;
+  margin: 0 4px;
 }
 
 .toolbar .el-button {

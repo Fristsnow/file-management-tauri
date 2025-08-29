@@ -1,17 +1,23 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted, computed, nextTick } from "vue";
-import { ElMessage, ElProgress, ElMessageBox } from "element-plus";
-import { Folder, Document, Upload, VideoPause, VideoPlay, InfoFilled } from "@element-plus/icons-vue";
-import { uploadSingleFileApi, uploadSmallFileApi, formatFileSize, uploadFolderApi, abortMultipartUploadApi } from '@/api/ftp.js';
-import { getUserInfoApi } from '@/api/login.js';
-import { useFileStore } from '@/stores/fileStore.js';
-import { useUserStore } from '@/stores/userStore.js';
+import {ref, watch, onMounted, onUnmounted, computed, nextTick} from "vue";
+import {ElMessage, ElProgress, ElMessageBox} from "element-plus";
+import {Folder, Document, Upload, VideoPause, VideoPlay, InfoFilled} from "@element-plus/icons-vue";
+import {
+  uploadSingleFileApi,
+  uploadSmallFileApi,
+  formatFileSize,
+  uploadFolderApi,
+  abortMultipartUploadApi
+} from '@/api/ftp.js';
+import {getUserInfoApi} from '@/api/login.js';
+import {useFileStore} from '@/stores/fileStore.js';
+import {useUserStore} from '@/stores/userStore.js';
 // 恢复进度组件到上传对话框中
 import FolderStructureList from './FolderStructureList.vue';
 import UploadProgress from './UploadProgress.vue';
 
 // 导入统一拖拽处理器
-import { dragHandler } from '@/utils/dragHandler.js';
+import {dragHandler} from '@/utils/dragHandler.js';
 
 // 拖拽处理器相关状态
 const dragHandlerInitialized = ref(false);
@@ -24,16 +30,16 @@ const isTauri = computed(() => environmentInfo.value?.isTauri || false);
 // 初始化拖拽处理器
 const initDragHandler = async () => {
   try {
-    
+
     const result = await dragHandler.initialize({
       onFileDrop: handleFileDrop
     });
-    
+
     if (result.success) {
       dragHandlerInitialized.value = true;
       dragEventHandlers.value = result.handlers;
       environmentInfo.value = dragHandler.getEnvironmentInfo();
-      
+
       return result;
     } else {
       throw new Error(result.error || '拖拽处理器初始化失败');
@@ -47,11 +53,11 @@ const initDragHandler = async () => {
       userAgent: navigator.userAgent,
       fallbackMode: true
     };
-    
+
     // 显示用户友好的提示
     ElMessage.warning('拖拽处理器初始化失败，已启用基础拖拽功能');
-    
-    return { success: false, error: error.message, fallbackMode: true };
+
+    return {success: false, error: error.message, fallbackMode: true};
   }
 };
 
@@ -76,8 +82,8 @@ const handleDragFolderUpload = async (folderPath, files) => {
     ElMessage.info('正在处理拖拽的文件夹...');
 
     // 动态导入Tauri invoke函数
-    const { invoke } = await import('@tauri-apps/api/core');
-    
+    const {invoke} = await import('@tauri-apps/api/core');
+
     // 调用专门的拖拽文件夹上传命令
     const uploadResult = await invoke('upload_drag_folder_with_structure', {
       folderPath: folderPath,
@@ -110,7 +116,7 @@ const handleFileDrop = async (files, metadata) => {
     file.isDragFile = true;
     return file;
   });
-  
+
   // 根据拖拽内容类型设置标志
   if (metadata.hasDirectories && !metadata.hasFiles) {
     // 只有文件夹
@@ -129,10 +135,10 @@ const handleFileDrop = async (files, metadata) => {
     isFile.value = true;
     isFolder.value = false;
   }
-  
+
   // 添加标记后的文件到待上传列表
   addFiles(draggedFiles);
-  
+
   // 根据内容类型显示不同的提示信息
   if (metadata.hasDirectories && metadata.hasFiles) {
     ElMessage.success(`成功添加 ${files.length} 个项目到上传列表（包含文件和文件夹）`);
@@ -145,10 +151,10 @@ const handleFileDrop = async (files, metadata) => {
 
 
 const props = defineProps({
-  modelValue: { type: Boolean, required: true },
-  currentPath: { type: String, default: "/" },
-  currentFolderId: { type: Number, default: 0 },
-  defaultFiles: { type: Array, default: () => [] },
+  modelValue: {type: Boolean, required: true},
+  currentPath: {type: String, default: "/"},
+  currentFolderId: {type: Number, default: 0},
+  defaultFiles: {type: Array, default: () => []},
 });
 
 const emit = defineEmits(["update:modelValue", "confirm", "upload-complete"]);
@@ -291,7 +297,7 @@ const connectWebSocket = async () => {
       const apiUserId = userInfoResponse?.data?.id || userInfoResponse?.id;
       if (apiUserId) {
         // 更新store中的用户信息
-        userStore.setUserInfo({ ...userStore.userInfo, id: apiUserId });
+        userStore.setUserInfo({...userStore.userInfo, id: apiUserId});
       }
     } catch (error) {
       console.error('获取用户信息失败:', error);
@@ -387,7 +393,7 @@ const connectWebSocket = async () => {
 // 从WebSocket更新文件夹进度
 const updateFolderProgressFromWebSocket = (data) => {
   // 适配后端新的消息格式：fileName -> folderName, uploaded -> uploadedSize, total -> totalSize
-  const { fileName, progress, uploaded: uploadedSize, total: totalSize, status, completedFiles, totalFiles } = data;
+  const {fileName, progress, uploaded: uploadedSize, total: totalSize, status, completedFiles, totalFiles} = data;
 
   // 从文件名中提取顶级文件夹名称
   const folderName = getTopLevelDirectory(fileName);
@@ -398,11 +404,11 @@ const updateFolderProgressFromWebSocket = (data) => {
     // 检查并清理可能存在的重复文件夹项（不同键名但指向同一文件夹）
     const existingKeys = Array.from(directoryProgress.value.keys());
     const duplicateKeys = existingKeys.filter(key =>
-      key !== folderName && (
-        key.toLowerCase() === folderName.toLowerCase() ||
-        key.replace(/\\/g, '/') === folderName.replace(/\\/g, '/') ||
-        key.replace(/\//g, '\\') === folderName.replace(/\//g, '\\')
-      )
+            key !== folderName && (
+                key.toLowerCase() === folderName.toLowerCase() ||
+                key.replace(/\\/g, '/') === folderName.replace(/\\/g, '/') ||
+                key.replace(/\//g, '\\') === folderName.replace(/\//g, '\\')
+            )
     );
 
     // 删除重复的文件夹项
@@ -454,9 +460,9 @@ const updateFolderProgressFromWebSocket = (data) => {
     // 检查是否有相似的文件夹名称（可能是路径分隔符或编码问题）
     const existingKeys = Array.from(directoryProgress.value.keys());
     const similarKey = existingKeys.find(key =>
-      key.toLowerCase() === folderName.toLowerCase() ||
-      key.replace(/\\/g, '/') === folderName.replace(/\\/g, '/') ||
-      key.replace(/\//g, '\\') === folderName.replace(/\//g, '\\')
+        key.toLowerCase() === folderName.toLowerCase() ||
+        key.replace(/\\/g, '/') === folderName.replace(/\\/g, '/') ||
+        key.replace(/\//g, '\\') === folderName.replace(/\//g, '\\')
     );
 
     if (similarKey) {
@@ -527,11 +533,11 @@ const updateFolderProgressFromWebSocket = (data) => {
 
 // 从WebSocket更新单个文件进度
 const updateFileProgressFromWebSocket = (data) => {
-  const { fileName, progress, uploadedSize, totalSize, status, speed } = data;
+  const {fileName, progress, uploadedSize, totalSize, status, speed} = data;
 
   // 查找对应的文件上传项
   const uploadItem = fileStore.uploadProgress.find(item =>
-    item.name === fileName || (item.file && item.file.name === fileName)
+      item.name === fileName || (item.file && item.file.name === fileName)
   );
 
   if (uploadItem) {
@@ -658,7 +664,7 @@ const updateDirectoryProgressFromFiles = (directoryName) => {
 
   group.files.forEach(file => {
     const fileUploadItem = fileStore.uploadProgress.find(item =>
-      item.name === (file.webkitRelativePath || file.name)
+        item.name === (file.webkitRelativePath || file.name)
     );
     if (fileUploadItem) {
       // 对于已完成的文件，直接使用文件完整大小，避免进度计算误差
@@ -702,43 +708,43 @@ const updateDirectoryProgressFromFiles = (directoryName) => {
 
 // 监听弹窗打开状态，每次打开时清空之前的记录并建立WebSocket连接
 watch(
-  () => props.modelValue,
-  async (newValue) => {
-    if (newValue) {
-      // 弹窗打开时清空之前的上传记录
-      fileStore.clearAllUploads();
-      directoryProgress.value.clear();
-      showDirectoryProgress.value = false;
-      
-      // 重置进度条显示标志
-      isFile.value = true;
-      isFolder.value = false;
+    () => props.modelValue,
+    async (newValue) => {
+      if (newValue) {
+        // 弹窗打开时清空之前的上传记录
+        fileStore.clearAllUploads();
+        directoryProgress.value.clear();
+        showDirectoryProgress.value = false;
 
-      // 弹窗打开时立即建立WebSocket连接
-      try {
-        await connectWebSocket();
-      } catch (error) {
-        console.warn('弹窗打开时WebSocket连接失败:', error.message);
-      }
-    } else {
-      // 弹窗关闭时断开WebSocket连接
-      if (ws.value) {
-        ws.value.close();
-        ws.value = null;
-        wsConnected.value = false;
+        // 重置进度条显示标志
+        isFile.value = true;
+        isFolder.value = false;
+
+        // 弹窗打开时立即建立WebSocket连接
+        try {
+          await connectWebSocket();
+        } catch (error) {
+          console.warn('弹窗打开时WebSocket连接失败:', error.message);
+        }
+      } else {
+        // 弹窗关闭时断开WebSocket连接
+        if (ws.value) {
+          ws.value.close();
+          ws.value = null;
+          wsConnected.value = false;
+        }
       }
     }
-  }
 );
 
 // 监听外部拖拽文件传入
 watch(
-  () => props.defaultFiles,
-  (newFiles) => {
-    if (newFiles.length) {
-      addFiles(newFiles);
+    () => props.defaultFiles,
+    (newFiles) => {
+      if (newFiles.length) {
+        addFiles(newFiles);
+      }
     }
-  }
 );
 
 // 添加文件（去重：文件名+相对路径相同才算重复）
@@ -792,23 +798,23 @@ const isFolder = ref(false)
 // 处理文件夹选择时的空文件夹检测
 const processFilesWithEmptyFolders = async (files) => {
   const processedFiles = [...files];
-  
+
   // 构建文件夹结构映射
   const folderStructure = new Map();
-  
+
   files.forEach(file => {
     if (file.webkitRelativePath) {
       const pathParts = file.webkitRelativePath.split('/');
       // 移除文件名，只保留文件夹路径
       const folderParts = pathParts.slice(0, -1);
-      
+
       // 记录所有层级的文件夹路径
       for (let i = 1; i <= folderParts.length; i++) {
         const folderPath = folderParts.slice(0, i).join('/');
         if (!folderStructure.has(folderPath)) {
           folderStructure.set(folderPath, new Set());
         }
-        
+
         // 如果是最后一级文件夹，记录包含的文件
         if (i === folderParts.length) {
           folderStructure.get(folderPath).add(file.name);
@@ -816,22 +822,22 @@ const processFilesWithEmptyFolders = async (files) => {
       }
     }
   });
-  
+
   // 检测空文件夹
   const allFolderPaths = new Set();
   const occupiedFolderPaths = new Set();
-  
+
   files.forEach(file => {
     if (file.webkitRelativePath) {
       const pathParts = file.webkitRelativePath.split('/');
       const folderParts = pathParts.slice(0, -1);
-      
+
       // 记录所有文件夹路径
       for (let i = 1; i <= folderParts.length; i++) {
         const folderPath = folderParts.slice(0, i).join('/');
         allFolderPaths.add(folderPath);
       }
-      
+
       // 记录直接包含文件的文件夹路径
       if (folderParts.length > 0) {
         const directParentPath = folderParts.join('/');
@@ -839,20 +845,20 @@ const processFilesWithEmptyFolders = async (files) => {
       }
     }
   });
-  
+
   // 找出空文件夹（存在于allFolderPaths但不在occupiedFolderPaths中的路径）
   const emptyFolderPaths = [...allFolderPaths].filter(path => {
     // 检查这个路径是否有直接的子文件
     const hasDirectFiles = [...occupiedFolderPaths].some(occupiedPath => occupiedPath === path);
-    
+
     // 检查这个路径是否有子文件夹包含文件
-    const hasSubFoldersWithFiles = [...occupiedFolderPaths].some(occupiedPath => 
-      occupiedPath.startsWith(path + '/') && occupiedPath !== path
+    const hasSubFoldersWithFiles = [...occupiedFolderPaths].some(occupiedPath =>
+        occupiedPath.startsWith(path + '/') && occupiedPath !== path
     );
-    
+
     return !hasDirectFiles && !hasSubFoldersWithFiles;
   });
-  
+
   // 为空文件夹创建占位符
   emptyFolderPaths.forEach(emptyPath => {
     const emptyFolderPlaceholder = {
@@ -865,7 +871,7 @@ const processFilesWithEmptyFolders = async (files) => {
     };
     processedFiles.push(emptyFolderPlaceholder);
   });
-  
+
   return processedFiles;
 };
 
@@ -906,17 +912,17 @@ const handleAddFiles = async (e) => {
   if (isDirectoryInput) {
     const processedFiles = await processFilesWithEmptyFolders(files);
     addFiles(processedFiles);
-    
+
     const folderName = files[0].webkitRelativePath ? files[0].webkitRelativePath.split('/')[0] : '未知文件夹';
     const totalFiles = processedFiles.length;
     const emptyFolders = processedFiles.filter(f => f.isEmptyFolderPlaceholder).length;
-    
+
     if (emptyFolders > 0) {
       ElMessage.success(`成功选择文件夹 "${folderName}"，包含 ${files.length} 个文件和 ${emptyFolders} 个空文件夹`);
     } else {
       ElMessage.success(`成功选择文件夹 "${folderName}"，包含 ${totalFiles} 个文件`);
     }
-    
+
     isFile.value = false;
     isFolder.value = true;
   } else {
@@ -937,9 +943,9 @@ const handleTauriFolderSelect = async () => {
 
   try {
     // 动态导入Tauri API
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const { invoke } = await import('@tauri-apps/api/core');
-    
+    const {open} = await import('@tauri-apps/plugin-dialog');
+    const {invoke} = await import('@tauri-apps/api/core');
+
     // 使用Tauri对话框选择文件夹
     const folderPath = await open({
       directory: true,
@@ -993,7 +999,7 @@ const handleTauriFolderSelect = async () => {
 
     const folderName = folderPath.split(/[\\/]/).pop() || '未知文件夹';
     const emptyFolders = scanResult.empty_folders;
-    
+
     if (emptyFolders > 0) {
       ElMessage.success(`成功选择文件夹 "${folderName}"，包含 ${scanResult.total_files} 个文件和 ${emptyFolders} 个空文件夹`);
     } else {
@@ -1012,7 +1018,7 @@ const handleTauriFolderSelect = async () => {
 // 测试拖拽功能
 const testTauriDragFunction = () => {
   console.log('🧪 开始测试拖拽功能');
-  
+
   // 使用新的拖拽处理器进行测试
   if (dragHandler && dragHandler.testDragFunction) {
     dragHandler.testDragFunction();
@@ -1033,7 +1039,7 @@ const handleTauriFolderUpload = async (folderPath, files) => {
     // 获取用户信息和上传配置
     const userInfo = await getUserInfoApi();
     console.log('用户信息:', userInfo);
-    
+
     // 临时硬编码配置用于测试
     const uploadConfig = {
       baseUrl: 'http://localhost:8089',
@@ -1047,8 +1053,8 @@ const handleTauriFolderUpload = async (folderPath, files) => {
     ElMessage.info('正在使用Rust后端上传文件夹...');
 
     // 动态导入Tauri invoke函数
-    const { invoke } = await import('@tauri-apps/api/core');
-    
+    const {invoke} = await import('@tauri-apps/api/core');
+
     // 调用Rust命令上传文件夹
     const uploadResult = await invoke('upload_folder_with_structure', {
       folderPath: folderPath,
@@ -1084,7 +1090,7 @@ const handleTauriDragFolderUpload = async (folderPath, files) => {
   try {
     // 获取用户信息和上传配置
     const userInfo = await getUserInfoApi();
-    
+
     // 上传配置
     const uploadConfig = {
       baseUrl: 'http://localhost:8089',
@@ -1096,8 +1102,8 @@ const handleTauriDragFolderUpload = async (folderPath, files) => {
     ElMessage.info('正在使用Rust后端处理拖拽文件夹上传...');
 
     // 动态导入Tauri invoke函数
-    const { invoke } = await import('@tauri-apps/api/core');
-    
+    const {invoke} = await import('@tauri-apps/api/core');
+
     // 调用专门的拖拽文件夹上传命令
     const uploadResult = await invoke('upload_drag_folder_with_structure', {
       folderPath: folderPath,
@@ -1125,7 +1131,7 @@ const handleTauriDragFolderUpload = async (folderPath, files) => {
 const handleDrop = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  
+
   const handler = dragEventHandlers.value?.drop;
   if (handler) {
     handler(e);
@@ -1144,7 +1150,7 @@ const handleFallbackDrop = async (e) => {
     const files = [];
     let hasDirectories = false;
     let hasFiles = false;
-    
+
     // 处理拖拽项目
     for (const item of items) {
       if (item.kind === 'file') {
@@ -1160,7 +1166,7 @@ const handleFallbackDrop = async (e) => {
         }
       }
     }
-    
+
     // 如果没有通过 webkitGetAsEntry 获取到文件，回退到传统方式
     if (files.length === 0) {
       console.log('⚠️ webkitGetAsEntry 未获取到文件，使用传统方式');
@@ -1171,16 +1177,16 @@ const handleFallbackDrop = async (e) => {
         console.log(`传统方式获取到 ${fallbackFiles.length} 个文件`);
       }
     }
-    
+
     if (files.length > 0) {
       console.log(`📊 拖拽处理结果: ${files.length} 个文件, 包含文件夹: ${hasDirectories}, 包含文件: ${hasFiles}`);
-      
+
       // 为文件添加拖拽标记
       const draggedFiles = files.map(file => {
         file.isDragFile = true;
         return file;
       });
-      
+
       // 设置文件类型标志
       if (hasDirectories && !hasFiles) {
         isFolder.value = true;
@@ -1198,10 +1204,10 @@ const handleFallbackDrop = async (e) => {
         isFile.value = true;
         isFolder.value = false;
       }
-      
+
       // 添加文件到列表
       addFiles(draggedFiles);
-      
+
       // 显示成功提示
       if (hasDirectories && hasFiles) {
         ElMessage.success(`成功添加 ${files.length} 个项目到上传列表（包含文件和文件夹）`);
@@ -1234,7 +1240,7 @@ const processFallbackBrowserEntry = async (entry, files, path = '') => {
               value: relativePath,
               writable: false
             });
-            
+
             files.push(file);
             console.log(`📄 添加文件: ${relativePath}`);
             resolve();
@@ -1251,7 +1257,7 @@ const processFallbackBrowserEntry = async (entry, files, path = '') => {
       // 处理文件夹
       const dirPath = path ? `${path}/${entry.name}` : entry.name;
       console.log(`📁 处理文件夹: ${dirPath}`);
-      
+
       return new Promise((resolve, reject) => {
         const dirReader = entry.createReader();
         const readEntries = async () => {
@@ -1277,8 +1283,8 @@ const processFallbackBrowserEntry = async (entry, files, path = '') => {
                   resolve();
                 } else {
                   // 递归处理文件夹内容
-                  const promises = entries.map(childEntry => 
-                    processFallbackBrowserEntry(childEntry, files, dirPath)
+                  const promises = entries.map(childEntry =>
+                      processFallbackBrowserEntry(childEntry, files, dirPath)
                   );
                   await Promise.all(promises);
                   resolve();
@@ -1308,7 +1314,7 @@ const processFallbackBrowserEntry = async (entry, files, path = '') => {
 const handleDragOver = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  
+
   const handler = dragEventHandlers.value?.dragover;
   if (handler) {
     handler(e);
@@ -1319,7 +1325,7 @@ const handleDragOver = (e) => {
 const handleDragEnter = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  
+
   const handler = dragEventHandlers.value?.dragenter;
   if (handler) {
     handler(e);
@@ -1330,7 +1336,7 @@ const handleDragEnter = (e) => {
 const handleDragLeave = (e) => {
   e.preventDefault();
   e.stopPropagation();
-  
+
   const handler = dragEventHandlers.value?.dragleave;
   if (handler) {
     handler(e);
@@ -1388,13 +1394,13 @@ const handleSmartFolderUpload = async (files) => {
               type: file.type,
               lastModified: Date.now()
             });
-            
+
             // 设置webkitRelativePath以保持文件夹结构
             Object.defineProperty(placeholderFile, 'webkitRelativePath', {
               value: file.webkitRelativePath,
               writable: false
             });
-            
+
             processedFiles.push(placeholderFile);
           } else {
             processedFiles.push(file);
@@ -1403,7 +1409,7 @@ const handleSmartFolderUpload = async (files) => {
 
         processedFiles.forEach(file => {
           const targetPath = props.currentPath || '/';
-          
+
           if (file.isEmptyFolderPlaceholder) {
             // 处理空文件夹占位符
             const fullUploadPath = targetPath === '/' ? file.webkitRelativePath : targetPath + '/' + file.webkitRelativePath;
@@ -1422,7 +1428,7 @@ const handleSmartFolderUpload = async (files) => {
         // 更新所有文件状态为上传中
         folderFiles.forEach(file => {
           const uploadItem = fileStore.uploadProgress.find(item =>
-            item.name === (file.webkitRelativePath || file.name)
+              item.name === (file.webkitRelativePath || file.name)
           );
           if (uploadItem) {
             fileStore.updateUploadItem(uploadItem.id, {
@@ -1434,16 +1440,17 @@ const handleSmartFolderUpload = async (files) => {
 
         // 执行批量上传
         const response = await uploadFolderApi(
-          processedFiles,
-          objectNames,
-          originalFileNames,
-          uploadConfig.bucketName
+            processedFiles,
+            objectNames,
+            originalFileNames,
+            uploadConfig.bucketName,
+            fileStore.currentProjectId
         );
 
         // 更新所有文件状态为完成
         folderFiles.forEach(file => {
           const uploadItem = fileStore.uploadProgress.find(item =>
-            item.name === (file.webkitRelativePath || file.name)
+              item.name === (file.webkitRelativePath || file.name)
           );
           if (uploadItem) {
             fileStore.updateUploadItem(uploadItem.id, {
@@ -1465,7 +1472,7 @@ const handleSmartFolderUpload = async (files) => {
         // 重置文件状态
         folderFiles.forEach(file => {
           const uploadItem = fileStore.uploadProgress.find(item =>
-            item.name === (file.webkitRelativePath || file.name)
+              item.name === (file.webkitRelativePath || file.name)
           );
           if (uploadItem) {
             fileStore.updateUploadItem(uploadItem.id, {
@@ -1481,7 +1488,7 @@ const handleSmartFolderUpload = async (files) => {
     }
   }
 
-  return { remainingFiles };
+  return {remainingFiles};
 };
 
 // 批量上传文件 - 严格分离文件夹上传和单文件上传
@@ -1510,7 +1517,7 @@ const runFileUploadsWithFiles = async (files) => {
 
     // 统一处理所有文件：拖拽和按钮选择都走相同的上传逻辑
     const allFolderFiles = [...folderFiles, ...emptyFolders];
-    
+
     console.log('统一文件上传处理:', {
       folderFiles: folderFiles.length,
       emptyFolders: emptyFolders.length,
@@ -1571,7 +1578,7 @@ const runFileUploadsWithFiles = async (files) => {
     // 等待所有分组上传完成
     await Promise.all(uploadTasks);
     ElMessage.success('所有文件上传完成!');
-    
+
     // 触发上传完成事件，通知父组件刷新文件列表
     emit('upload-complete');
 
@@ -1594,7 +1601,7 @@ class ConcurrencyQueue {
 
   async add(task) {
     return new Promise((resolve, reject) => {
-      this.queue.push({ task, resolve, reject });
+      this.queue.push({task, resolve, reject});
       this.process();
     });
   }
@@ -1605,7 +1612,7 @@ class ConcurrencyQueue {
     }
 
     this.running++;
-    const { task, resolve, reject } = this.queue.shift();
+    const {task, resolve, reject} = this.queue.shift();
 
     try {
       const result = await task();
@@ -1623,20 +1630,20 @@ class ConcurrencyQueue {
 const handleSingleFilesUpload = async (singleFiles) => {
   const MB = 1024 * 1024;
   const GB = 1024 * MB;
-  
+
   // 按文件大小分组
   const smallFiles = singleFiles.filter(file => file.size < 50 * MB);
   const mediumFiles = singleFiles.filter(file => file.size >= 50 * MB && file.size < 1 * GB);
   const largeFiles = singleFiles.filter(file => file.size >= 1 * GB && file.size < 3 * GB);
   const extraLargeFiles = singleFiles.filter(file => file.size >= 3 * GB);
-  
+
   const uploadTasks = [];
-  
+
   if (smallFiles.length > 0) uploadTasks.push(uploadFileGroup(smallFiles, 3, 'small'));
   if (mediumFiles.length > 0) uploadTasks.push(uploadFileGroup(mediumFiles, 3, 'medium'));
   if (largeFiles.length > 0) uploadTasks.push(uploadFileGroup(largeFiles, 2, 'large'));
   if (extraLargeFiles.length > 0) uploadTasks.push(uploadFileGroup(extraLargeFiles, 1, 'extraLarge'));
-  
+
   await Promise.all(uploadTasks);
 };
 
@@ -1646,7 +1653,7 @@ const uploadFileGroup = async (files, concurrency, groupType) => {
 
   const uploadSingleFile = async (file) => {
     const uploadItem = fileStore.uploadProgress.find(item =>
-      item.name === (file.webkitRelativePath || file.name)
+        item.name === (file.webkitRelativePath || file.name)
     );
 
     if (!uploadItem) {
@@ -1708,7 +1715,7 @@ const uploadFileGroup = async (files, concurrency, groupType) => {
         }, PROGRESS_UPDATE_INTERVAL);
 
         // 直接使用小文件上传API，避免重复调用
-        response = await uploadSmallFileApi(file, uploadConfig.bucketName, fullUploadPath, props.currentFolderId, false);
+        response = await uploadSmallFileApi(file, uploadConfig.bucketName, fullUploadPath, props.currentFolderId, false, fileStore.currentProjectId);
         clearInterval(progressInterval);
       } else {
         // 中等、大文件、超大文件使用大文件上传接口
@@ -1717,6 +1724,7 @@ const uploadFileGroup = async (files, concurrency, groupType) => {
           objectName: fullUploadPath,
           currentPath: finalObjectName,
           overwrite: false,
+          projectId: fileStore.currentProjectId,
           onUploadIdReady: (uploadId) => {
             // 尽早存储uploadId以便中止操作
             fileStore.updateUploadItem(uploadItem.id, {
@@ -1779,7 +1787,7 @@ const uploadFileGroup = async (files, concurrency, groupType) => {
   };
 
   const promises = files.map(file =>
-    queue.add(() => uploadSingleFile(file))
+      queue.add(() => uploadSingleFile(file))
   );
 
   await Promise.all(promises);
@@ -1789,7 +1797,7 @@ const toggleUpload = (fileName) => {
   const uploadItem = fileStore.uploadProgress.find(item => item.name === fileName);
   if (uploadItem) {
     const newStatus = uploadItem.status === 'uploading' ? 'paused' : 'uploading';
-    fileStore.updateUploadItem(uploadItem.id, { status: newStatus });
+    fileStore.updateUploadItem(uploadItem.id, {status: newStatus});
   }
 };
 
@@ -1808,8 +1816,8 @@ const clearCompletedUploads = () => {
 
 const clearCompletedFolders = () => {
   const completedFolders = Array.from(directoryProgress.value.entries())
-    .filter(([_, group]) => group.status === 'completed')
-    .map(([name, _]) => name);
+      .filter(([_, group]) => group.status === 'completed')
+      .map(([name, _]) => name);
 
   completedFolders.forEach(folderName => {
     directoryProgress.value.delete(folderName);
@@ -1831,7 +1839,7 @@ const handleConfirm = async () => {
 
   // 保存文件列表的副本，避免在上传过程中被清空
   const filesToUpload = [...fileList.value];
-  
+
   const directoryGroups = groupFilesByDirectory(filesToUpload);
   directoryProgress.value = directoryGroups;
   showDirectoryProgress.value = true;
@@ -1880,14 +1888,14 @@ const handleCancel = async (done) => {
   if (isUploading.value) {
     try {
       await ElMessageBox.confirm(
-        '当前有文件正在上传中，退出将会终止所有上传任务，确定要退出吗？',
-        '确认退出',
-        {
-          confirmButtonText: '确定退出',
-          cancelButtonText: '取消',
-          type: 'warning',
-          dangerouslyUseHTMLString: false
-        }
+          '当前有文件正在上传中，退出将会终止所有上传任务，确定要退出吗？',
+          '确认退出',
+          {
+            confirmButtonText: '确定退出',
+            cancelButtonText: '取消',
+            type: 'warning',
+            dangerouslyUseHTMLString: false
+          }
       );
 
       // 用户确认退出，停止所有上传任务
@@ -1982,14 +1990,14 @@ const preventDefault = (e) => {
 
 onMounted(async () => {
   console.log('🚀 FileUploadDialog组件开始初始化');
-  
+
   // 初始化新的拖拽处理器
   await initDragHandler();
-  
+
   // 设置全局拖拽阻止事件
   window.addEventListener("dragover", preventDefault);
   window.addEventListener("drop", preventDefault);
-  
+
   console.log('✅ FileUploadDialog组件初始化完成');
 });
 
@@ -2013,17 +2021,19 @@ onUnmounted(() => {
 
 <template>
   <el-dialog
-    v-model="dialogVisible"
-    width="800px"
-    class="bt-upload-dialog"
-    :show-close="true"
-    :close-on-click-modal="false"
-    :before-close="handleCancel"
-    title="文件上传"
+      v-model="dialogVisible"
+      width="800px"
+      class="bt-upload-dialog"
+      :show-close="true"
+      :close-on-click-modal="false"
+      :before-close="handleCancel"
+      title="文件上传"
   >
     <!-- 路径显示 -->
     <div class="upload-path">
-      <el-icon class="path-icon"><Folder /></el-icon>
+      <el-icon class="path-icon">
+        <Folder/>
+      </el-icon>
       <span class="path-text">上传到：{{ props.currentPath || '/' }}</span>
     </div>
 
@@ -2033,10 +2043,10 @@ onUnmounted(() => {
         <el-button type="primary" :icon="Upload" :disabled="isUploading">
           <label class="file-input-label">
             <input
-              type="file"
-              multiple
-              class="hidden"
-              @change="handleAddFiles"
+                type="file"
+                multiple
+                class="hidden"
+                @change="handleAddFiles"
             />
             选择文件
           </label>
@@ -2045,45 +2055,45 @@ onUnmounted(() => {
         <el-button type="primary" plain :icon="Folder" :disabled="isUploading">
           <label class="file-input-label">
             <input
-              type="file"
-              webkitdirectory
-              class="hidden"
-              @change="handleAddFiles"
+                type="file"
+                webkitdirectory
+                class="hidden"
+                @change="handleAddFiles"
             />
             选择文件夹
           </label>
         </el-button>
 
         <!-- Tauri文件夹选择按钮 -->
-        <el-button 
-          v-if="isTauri" 
-          type="success" 
-          plain 
-          :icon="Folder" 
-          :disabled="isUploading"
-          @click="handleTauriFolderSelect"
+        <el-button
+            v-if="isTauri"
+            type="success"
+            plain
+            :icon="Folder"
+            :disabled="isUploading"
+            @click="handleTauriFolderSelect"
         >
           Rust文件夹选择
         </el-button>
-        
+
         <!-- Tauri调试测试按钮 -->
-        <el-button 
-          v-if="isTauri" 
-          type="warning" 
-          plain 
-          :icon="InfoFilled" 
-          size="small"
-          @click="testTauriDragFunction"
+        <el-button
+            v-if="isTauri"
+            type="warning"
+            plain
+            :icon="InfoFilled"
+            size="small"
+            @click="testTauriDragFunction"
         >
           测试拖拽功能
         </el-button>
 
         <el-button
-          v-if="fileList.length > 0"
-          type="danger"
-          plain
-          @click="handleClear"
-          :disabled="isUploading"
+            v-if="fileList.length > 0"
+            type="danger"
+            plain
+            @click="handleClear"
+            :disabled="isUploading"
         >
           清空列表
         </el-button>
@@ -2101,29 +2111,35 @@ onUnmounted(() => {
           上传中：<strong>{{ fileStore.uploadProgress.filter(item => item.status === 'uploading').length }}</strong> 个文件
         </span>
         <span v-if="showDirectoryProgress && directoryProgress.size > 0" class="stat-item">
-          已完成目录：<strong>{{ Array.from(directoryProgress.values()).filter(dir => dir.status === 'completed').length }}</strong>/{{ directoryProgress.size }}
+          已完成目录：<strong>{{
+            Array.from(directoryProgress.values()).filter(dir => dir.status === 'completed').length
+          }}</strong>/{{ directoryProgress.size }}
         </span>
       </div>
 
       <!-- 性能优化提示 -->
       <div v-if="performanceMonitor.showPerformanceTip.value" class="performance-tip">
-        <el-icon class="tip-icon"><Upload /></el-icon>
+        <el-icon class="tip-icon">
+          <Upload/>
+        </el-icon>
         <span>检测到大量文件上传，已启用性能优化模式以提升体验</span>
       </div>
     </div>
 
     <!-- 拖拽上传区域 -->
     <div
-      class="bt-drag-area"
-      :class="{ 'is-dragging': isDragging }"
-      @drop="handleDrop"
-      @dragover="handleDragOver"
-      @dragenter="handleDragEnter"
-      @dragleave="handleDragLeave"
+        class="bt-drag-area"
+        :class="{ 'is-dragging': isDragging }"
+        @drop="handleDrop"
+        @dragover="handleDragOver"
+        @dragenter="handleDragEnter"
+        @dragleave="handleDragLeave"
     >
       <div v-if="!fileList.length && fileStore.uploadProgress.length === 0" class="drag-hint">
         <div class="drag-icon">
-          <el-icon size="48"><Upload /></el-icon>
+          <el-icon size="48">
+            <Upload/>
+          </el-icon>
         </div>
         <div class="drag-text">
           <div class="main-text">将文件拖拽到此处，或点击上方按钮选择文件</div>
@@ -2137,18 +2153,18 @@ onUnmounted(() => {
         <!-- 待上传文件列表 -->
         <div v-if="fileList.length > 0 && !isUploading" class="pending-section">
           <FolderStructureList
-            :file-list="fileList"
-            @remove-file="handleRemove"
-            @clear-all="handleClear"
+              :file-list="fileList"
+              @remove-file="handleRemove"
+              @clear-all="handleClear"
           />
         </div>
 
         <!-- 上传进度显示 -->
         <div v-if="fileStore.uploadProgress.length > 0" class="progress-section">
           <UploadProgress
-            :upload-progress="fileStore.uploadProgress"
-            @clear-completed="fileStore.clearCompletedUploads"
-            @clear-all="fileStore.clearAllUploads"
+              :upload-progress="fileStore.uploadProgress"
+              @clear-completed="fileStore.clearCompletedUploads"
+              @clear-all="fileStore.clearAllUploads"
           />
         </div>
       </div>
@@ -2159,25 +2175,25 @@ onUnmounted(() => {
       <div class="footer-actions">
         <div class="footer-info">
           <span v-if="isUploading" class="uploading-tip">
-            <el-icon class="loading-icon"><Upload /></el-icon>
+            <el-icon class="loading-icon"><Upload/></el-icon>
             正在上传中，请勿关闭窗口
           </span>
         </div>
         <div class="footer-buttons">
           <el-button
-            v-if="isUploading"
-            type="danger"
-            @click="handleCancel"
-            size="large"
+              v-if="isUploading"
+              type="danger"
+              @click="handleCancel"
+              size="large"
           >
             取消上传
           </el-button>
           <el-button
-            type="primary"
-            @click="handleConfirm"
-            :disabled="!fileList.length || isUploading"
-            size="large"
-            :icon="Upload"
+              type="primary"
+              @click="handleConfirm"
+              :disabled="!fileList.length || isUploading"
+              size="large"
+              :icon="Upload"
           >
             {{ isUploading ? '上传中...' : '开始上传' }}
           </el-button>
@@ -3033,8 +3049,12 @@ onUnmounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
 }
 
 .directory-details {
@@ -3129,9 +3149,15 @@ onUnmounted(() => {
 }
 
 @keyframes bounce {
-  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-  40% { transform: translateY(-3px); }
-  60% { transform: translateY(-2px); }
+  0%, 20%, 50%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-3px);
+  }
+  60% {
+    transform: translateY(-2px);
+  }
 }
 
 .speed-text {

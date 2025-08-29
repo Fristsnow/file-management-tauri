@@ -19,6 +19,15 @@ export const useFileStore = defineStore('fileStore', () => {
   // 树形数据
   const treeData = ref([])
 
+  // 工作空间列表
+  const workspaceList = ref([])
+
+  // 当前选中的项目ID
+  const currentProjectId = ref(null)
+
+  // 当前选中的项目信息
+  const currentProject = ref(null)
+
   // 上传进度
   const uploadProgress = ref([])
 
@@ -43,6 +52,29 @@ export const useFileStore = defineStore('fileStore', () => {
   // 设置树形数据
   const setTreeData = (data) => {
     treeData.value = data
+  }
+
+  // 设置工作空间列表
+  const setWorkspaceList = (workspaces) => {
+    workspaceList.value = workspaces
+  }
+
+  // 设置当前项目ID
+  const setCurrentProjectId = (projectId) => {
+    currentProjectId.value = projectId
+    // 同时更新当前项目信息
+    if (projectId && workspaceList.value.length > 0) {
+      const project = workspaceList.value.find(item => item.id === projectId)
+      currentProject.value = project || null
+    } else {
+      currentProject.value = null
+    }
+  }
+
+  // 设置当前项目信息
+  const setCurrentProject = (project) => {
+    currentProject.value = project
+    currentProjectId.value = project ? project.id : null
   }
 
   // 添加上传项
@@ -199,11 +231,17 @@ export const useFileStore = defineStore('fileStore', () => {
     currentFolder,
     fileList,
     treeData,
+    workspaceList,
+    currentProjectId,
+    currentProject,
     uploadProgress,
     downloadQueue,
     setCurrentFolder,
     setFileList,
     setTreeData,
+    setWorkspaceList,
+    setCurrentProjectId,
+    setCurrentProject,
     addUploadItem,
     updateUploadItem,
     clearCompletedUploads,
@@ -224,6 +262,6 @@ export const useFileStore = defineStore('fileStore', () => {
   persist: {
     key: 'file-store',
     storage: localStorage,
-    paths: ['currentFolder', 'fileList', 'treeData']
+    paths: ['currentFolder', 'fileList', 'treeData', 'workspaceList', 'currentProjectId', 'currentProject']
   }
 })

@@ -3,9 +3,9 @@
 
     <div class="breadcrumb-container">
 
-      <div class="breadcrumb-item root-item" @click="navigateToPath('/')">
+      <div class="breadcrumb-item root-item" @click="navigateToProject">
         <el-icon class="home-icon"><House /></el-icon>
-        <span class="item-text">根目录</span>
+        <span class="item-text">{{ currentProject ? currentProject.originalFileName : '根目录' }}</span>
       </div>
 
       <template v-for="(item, index) in breadcrumbItems" :key="index">
@@ -58,19 +58,28 @@ const props = defineProps({
   currentFolder: {
     type: String,
     default: '/'
+  },
+  currentProject: {
+    type: Object,
+    default: null
   }
 })
 
 const emit = defineEmits(['navigate', 'refresh'])
 
 const breadcrumbItems = computed(() => {
-  if (props.currentFolder === '/') return [];
-
+  if (!props.currentProject) return [];
+  
   const pathParts = props.currentFolder.split('/').filter(part => part);
+  
+  // 如果只是在项目根目录，不显示额外的面包屑
+  if (pathParts.length <= 1) return [];
+  
   const items = [];
-  let currentPath = '';
-
-  pathParts.forEach(part => {
+  let currentPath = `/${pathParts[0]}`; // 从项目名称开始
+  
+  // 从第二个路径部分开始（跳过项目名称）
+  pathParts.slice(1).forEach(part => {
     currentPath += '/' + part;
     items.push({
       name: part,
@@ -83,6 +92,13 @@ const breadcrumbItems = computed(() => {
 
 const navigateToPath = (path) => {
   emit('navigate', path)
+}
+
+const navigateToProject = () => {
+  if (props.currentProject) {
+    const projectPath = `/${props.currentProject.originalFileName}`;
+    emit('navigate', projectPath);
+  }
 }
 
 const copyPath = async () => {
