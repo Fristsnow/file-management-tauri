@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Vue 3 + Vite
 
 This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs
@@ -631,3 +632,6 @@ fs:deny-default
 log:default
 log:allow-log
 log:deny-log
+=======
+# file-management-tauri
+>>>>>>> 5f11facd883072c33477829609013949d78f1017
