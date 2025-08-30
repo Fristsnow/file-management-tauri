@@ -37,6 +37,24 @@ watch(() => fileStore.currentProjectId, (newProjectId) => {
   selectedProjectId.value = newProjectId;
 }, { immediate: true });
 
+// 监听工作空间列表变化，自动选中第一项
+watch(() => fileStore.workspaceList, (newWorkspaceList) => {
+  // 如果当前没有选中项目且工作空间列表不为空，自动选中第一项
+  if (!fileStore.currentProjectId && newWorkspaceList && newWorkspaceList.length > 0) {
+    const firstProject = newWorkspaceList[0];
+    selectedProjectId.value = firstProject.projectId;
+    
+    // 设置当前项目
+    fileStore.setCurrentProjectId(firstProject.projectId);
+    fileStore.setCurrentProject(firstProject);
+    
+    // 触发项目切换事件
+    emit('project-changed', firstProject);
+    
+    ElMessage.success(`已自动选择工作空间：${firstProject.originalFileName}`);
+  }
+}, { immediate: true });
+
 // 处理项目切换
 const handleProjectChange = (projectId) => {
   const selectedProject = fileStore.workspaceList.find(p => p.projectId === projectId);
@@ -51,8 +69,23 @@ const handleProjectChange = (projectId) => {
   }
 };
 
-onMounted(() => {
-  selectedProjectId.value = fileStore.currentProjectId;
+onMounted(async () => {
+  // 如果当前没有选中的项目，但有工作空间列表，则默认选中第一项
+  if (!fileStore.currentProjectId && fileStore.workspaceList.length > 0) {
+    const firstProject = fileStore.workspaceList[0];
+    selectedProjectId.value = firstProject.projectId;
+    
+    // 设置当前项目
+    fileStore.setCurrentProjectId(firstProject.projectId);
+    fileStore.setCurrentProject(firstProject);
+    
+    // 触发项目切换事件
+    emit('project-changed', firstProject);
+    
+    ElMessage.success(`已自动选择工作空间：${firstProject.originalFileName}`);
+  } else {
+    selectedProjectId.value = fileStore.currentProjectId;
+  }
 });
 </script>
 

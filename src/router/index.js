@@ -28,6 +28,11 @@ const routes = [
                 path: '/settings',
                 component: () => import('@/views/Settings.vue'),
                 name: 'Settings',
+            },
+            {
+                path: '/upload-log',
+                component: () => import('@/views/UploadLog.vue'),
+                name: 'UploadLog',
             }
         ]
     },

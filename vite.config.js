@@ -15,7 +15,6 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-
   const getWebSocketUrl = () => {
     if (mode === 'development') {
       return 'ws://127.0.0.1:8089/ws/upload-progress';
@@ -24,6 +23,9 @@ export default defineConfig(({ mode }) => {
     return 'ws://127.0.0.1:8089/ws/upload-progress';
   };
   return {
+    optimizeDeps: {
+      include: ['vue-virtual-scroller']
+    },
     plugins: [
       vue(),
       AutoImport({
@@ -56,3 +58,4 @@ export default defineConfig(({ mode }) => {
     }
   };
 });
+

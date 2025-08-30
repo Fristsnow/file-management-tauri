@@ -282,16 +282,41 @@ const navigateToPath = async (targetPath) => {
       return;
     }
     
+    // 首先检查目标路径是否已经缓存
+    const cachedId = folderIdCache.value.get(targetPath);
+    if (cachedId !== undefined) {
+      console.log('使用缓存的文件夹ID:', targetPath, '->', cachedId);
+      const {fileListData} = await loadFolderData(cachedId.toString());
+      fileStore.setFileList(fileListData);
+      fileStore.setCurrentFolder(targetPath);
+      return;
+    }
+    
     // 导航到项目内的子文件夹
     let currentId = 0;
+    let currentPath = `/${pathParts[0]}`; // 从项目根开始
+    
     for (let i = 1; i < pathParts.length; i++) {
       const part = pathParts[i];
+      
+      // 检查当前层级路径是否已缓存
+      const partialPath = currentPath + '/' + part;
+      const partialCachedId = folderIdCache.value.get(partialPath);
+      
+      if (partialCachedId !== undefined) {
+        console.log('使用缓存的部分路径ID:', partialPath, '->', partialCachedId);
+        currentId = partialCachedId;
+        currentPath = partialPath;
+        continue;
+      }
+      
+      // 如果没有缓存，则加载数据查找
       const {rawData} = await loadFolderData(currentId.toString());
       const folders = rawData.filter(item => item.isDir === 1);
 
       const targetFolder = folders.find(folder => folder.originalFileName === part);
       if (!targetFolder) {
-        console.error('找不到文件夹:', part);
+        console.error('找不到文件夹:', part, '在路径:', currentPath);
         // 回退到项目根目录
         const projectPath = `/${fileStore.currentProject.originalFileName}`;
         const {fileListData} = await loadFolderData('0');
@@ -302,6 +327,10 @@ const navigateToPath = async (targetPath) => {
       }
 
       currentId = targetFolder.id;
+      currentPath = partialPath;
+      
+      // 缓存这个部分路径
+      setCurrentFolderIdCache(currentPath, currentId);
     }
     
     const {fileListData} = await loadFolderData(currentId.toString());
@@ -382,17 +411,40 @@ const goBack = async () => {
 
 // 进入文件夹
 const enterFolder = async (folder) => {
-  const newPath = `${fileStore.currentFolder}/${folder.originalFileName}`;
+  try {
+    const {fileListData} = await loadFolderData(folder.id.toString());
+    
+    // 构建新的路径 - 确保路径格式正确
+    let newPath;
+    const currentPath = fileStore.currentFolder || '/';
+    
+    // 如果当前路径是根目录或项目根目录
+    if (currentPath === '/' || currentPath === `/${fileStore.currentProject?.originalFileName}`) {
+      // 确保包含项目名称
+      if (fileStore.currentProject) {
+        newPath = `/${fileStore.currentProject.originalFileName}/${folder.originalFileName}`;
+      } else {
+        newPath = `/${folder.originalFileName}`;
+      }
+    } else {
+      // 在现有路径基础上添加新文件夹
+      newPath = `${currentPath}/${folder.originalFileName}`;
+    }
+    
+    console.log('进入文件夹:', folder.originalFileName, '新路径:', newPath);
+    
+    fileStore.setFileList(fileListData);
+    fileStore.setCurrentFolder(newPath);
+    setCurrentFolderIdCache(newPath, folder.id);
 
-  // 加载新文件夹内容
-  const {fileListData} = await loadFolderData(folder.id.toString());
-  fileStore.setFileList(fileListData);
-  fileStore.setCurrentFolder(newPath);
-  setCurrentFolderIdCache(newPath, folder.id);
-
-  // 然后确保左侧树节点路径已加载并展开到目标节点
-  if (folder && folder.id) {
-    await ensureTreeNodeLoaded(folder);
+    // 然后确保左侧树节点路径已加载并展开到目标节点
+    if (folder && folder.id) {
+      await ensureTreeNodeLoaded(folder);
+    }
+    
+  } catch (error) {
+    console.error('进入文件夹失败:', error);
+    ElMessage.error('进入文件夹失败，请重试');
   }
 };
 
@@ -473,13 +525,19 @@ const handleProjectChange = async (project) => {
     // 清空当前文件夹缓存
     folderIdCache.value.clear();
     
-    // 重置到根目录
-    fileStore.setCurrentFolder('/');
+    // 设置当前项目路径
+    const projectPath = `/${project.originalFileName}`;
+    fileStore.setCurrentFolder(projectPath);
     
-    // 重新加载根目录数据
-    await loadFolder('/', 0);
+    // 加载项目根目录数据
+    const {fileListData} = await loadFolderData('0');
+    fileStore.setFileList(fileListData);
+    
+    // 缓存项目根目录ID
+    setCurrentFolderIdCache(projectPath, 0);
     
     console.log('已切换到项目:', project.originalFileName);
+    ElMessage.success(`已切换到工作空间：${project.originalFileName}`);
   } catch (error) {
     console.error('切换项目失败:', error);
     ElMessage.error('切换工作空间失败');
@@ -686,30 +744,18 @@ onMounted(async () => {
     const workspaceRes = await getUserWorderApi();
     if (workspaceRes.code === 200 && workspaceRes.data && workspaceRes.data.length > 0) {
       fileStore.setWorkspaceList(workspaceRes.data);
-      
-      // 默认选择第一个工作空间作为起始点
-      const firstWorkspace = workspaceRes.data[0];
-      fileStore.setCurrentProjectId(firstWorkspace.projectId);
-      fileStore.setCurrentProject(firstWorkspace);
-      
-      // 设置当前路径为第一个工作空间的路径
-      const workspacePath = `/${firstWorkspace.originalFileName}`;
-      fileStore.setCurrentFolder(workspacePath);
-      
-      // 加载第一个工作空间的内容
-      const {fileListData} = await loadFolderData(0); // 使用 0 作为项目根目录ID
-      fileStore.setFileList(fileListData);
-      
     } else {
       // 如果没有工作空间数据，显示空列表
       fileStore.setFileList([]);
       fileStore.setCurrentFolder('/');
+      ElMessage.warning('未找到可用的工作空间');
     }
   } catch (error) {
     console.error('初始化失败:', error);
     // 错误时显示空列表
     fileStore.setFileList([]);
     fileStore.setCurrentFolder('/');
+    ElMessage.error('初始化工作空间失败');
   }
 });
 </script>

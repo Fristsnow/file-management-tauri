@@ -16,12 +16,16 @@ import ElementPlusLocaleZhCn from 'element-plus/es/locale/lang/zh-cn'
 import { createPinia } from 'pinia'
 import { createPersistedState } from 'pinia-plugin-persistedstate'
 import router from "@/router/index.js";
+import VueVirtualScroller from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
 const app = createApp(App)
 
 // 创建pinia实例并配置持久化
 const pinia = createPinia()
 pinia.use(createPersistedState())
+
+app.use(VueVirtualScroller)
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
     app.component(key, component)
@@ -41,3 +45,12 @@ app.use(ElementPlus, {
 });
 
 app.mount('#app');
+// {
+//     "id": 1,
+//     "fileName": "大型化工机械设备全生命周期管理软件.txt",
+//     "result": 1,
+//     "userId": 4,
+//     "projectId": 1,
+//     "deptId": null,
+//     "createTime": "2025-08-28T03:31:52.000+00:00"
+// },

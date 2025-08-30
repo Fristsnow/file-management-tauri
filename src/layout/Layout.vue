@@ -9,8 +9,6 @@ import { useFileStore } from '@/stores/fileStore'
 // 全屏状态
 const isFullscreen = ref(false)
 
-
-
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
@@ -18,8 +16,9 @@ const fileStore = useFileStore()
 
 const activeMenu = computed(() => {
   if (route.name === 'FileManager') return 'files'
-  if (route.name === 'UploadManager' || route.name === 'UploadProgress') return 'uploads'
+  if (route.name === 'UploadLog') return 'upload-log'
   if (route.name === 'UserProfile') return 'profile'
+  if (route.name === 'Settings') return 'settings'
   return 'files'
 })
 
@@ -31,17 +30,23 @@ const menuItems = [
     route: '/'
   },
   {
-    key: 'profile',
+    key: 'upload-log',
     label: '上传记录',
-    icon: 'el-icon-user',
-    route: '/profile'
+    icon: 'el-icon-upload',
+    route: '/upload-log'
   },
-  {
-    key: 'profile',
-    label: '回收站',
-    icon: 'el-icon-user',
-    route: '/profile'
-  }
+  // {
+  //   key: 'settings',
+  //   label: '应用设置',
+  //   icon: 'el-icon-setting',
+  //   route: '/settings'
+  // },
+  // {
+  //   key: 'profile',
+  //   label: '个人信息',
+  //   icon: 'el-icon-user',
+  //   route: '/profile'
+  // }
 ]
 
 const handleMenuClick = (menuKey) => {
@@ -56,9 +61,9 @@ const handleUserMenuCommand = async (command) => {
     // case 'profile':
     //   router.push('/profile')
     //   break
-    case 'settings':
-      await router.push('/settings')
-      break
+    // case 'settings':
+    //   await router.push('/settings')
+    //   break
     case 'logout':
       await handleLogout()
       break
@@ -85,7 +90,7 @@ const handleLogout = async () => {
 
       ElMessage.success('已退出登录')
 
-      router.push('/login')
+      await router.push('/login')
     }
   } catch {
 
@@ -241,13 +246,30 @@ const toggleFullscreen = () => {
       <div class="header-right">
         <el-dropdown @command="handleUserMenuCommand">
           <span class="user-menu">
-            <span class="user-info">欢迎使用</span>
+            <div class="user-avatar-container">
+              <el-avatar 
+                v-if="userStore.userInfo.avatar" 
+                :src="userStore.userInfo.avatar" 
+                :size="32"
+                class="user-avatar"
+              />
+              <el-avatar 
+                v-else
+                :size="32"
+                class="user-avatar"
+              >
+                {{ userStore.userInfo.username ? userStore.userInfo.username.charAt(0).toUpperCase() : 'U' }}
+              </el-avatar>
+            </div>
+            <span class="user-info">
+              {{ userStore.userInfo.username || '欢迎使用' }}
+            </span>
             <el-icon class="dropdown-icon"><ArrowDown /></el-icon>
           </span>
           <template #dropdown>
             <el-dropdown-menu>
               <!-- <el-dropdown-item command="profile">个人信息</el-dropdown-item> -->
-              <el-dropdown-item command="settings">应用设置</el-dropdown-item>
+<!--              <el-dropdown-item command="settings">应用设置</el-dropdown-item>-->
               <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -402,17 +424,32 @@ const toggleFullscreen = () => {
   padding: 6px 10px;
   border-radius: 6px;
   transition: background-color 0.3s;
+  gap: 8px;
 }
 
 .user-menu:hover {
   background-color: rgba(255, 255, 255, 0.15);
 }
 
+.user-avatar-container {
+  display: flex;
+  align-items: center;
+}
+
+.user-avatar {
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  font-weight: 600;
+  font-size: 14px;
+}
+
 .user-info {
   color: #fff;
   font-size: 14px;
-  margin-right: 6px;
   font-weight: 500;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dropdown-icon {
@@ -438,7 +475,7 @@ const toggleFullscreen = () => {
 
 /* 下半部分：进度监控区域 */
 .lower-section {
-  height: 300px;
+  height: 260px;
   background: #fff;
   border-top: 1px solid #e5e7eb;
   box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.04);

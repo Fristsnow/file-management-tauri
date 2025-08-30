@@ -1,5 +1,11 @@
 <template>
-  <div class="file-list" @dragover="handleDragOver" @drop="handleDrop">
+  <div 
+    class="file-list" 
+    @dragover="handleDragOver" 
+    @drop="handleDrop"
+    @keydown="handleKeyDown"
+    tabindex="0"
+  >
     <!-- 批量操作工具栏 -->
     <div v-if="selectedFiles.length > 0" class="batch-toolbar">
       <div class="selected-info">
@@ -23,118 +29,112 @@
         >
           批量删除
         </el-button>
-        <el-button
-            size="small"
-            @click="clearSelection"
-        >
-          取消选择
-        </el-button>
+        <el-button size="small" @click="clearSelection">取消选择</el-button>
       </div>
     </div>
 
-    <div class="table-container">
-      <el-table
-          ref="tableRef"
-          :data="sortedFileList"
-          row-key="id"
-          class="table"
-          :header-cell-style="{ textAlign: 'center' }"
-          @selection-change="handleSelectionChange"
-      >
-        <el-table-column
-            type="selection"
-            width="55"
-            :selectable="isSelectable"
-        />
+    <!-- 文件统计信息 -->
+    <div class="file-stats">
+      <div class="stats-info">
+        <span class="total-count">共 {{ totalCount }} 项</span>
+        <span class="file-count">文件 {{ fileCount }} 个</span>
+        <span class="folder-count">文件夹 {{ folderCount }} 个</span>
+      </div>
+    </div>
 
-        <el-table-column prop="originalFileName" label="文件名" class-name="name-column">
-          <template #default="{ row }">
-            <div style="display: flex;">
-              <FileIcon style="margin-right: 5px;" :file-type="row.fileType" :is-folder="isFolder(row)"/>
-              <span
-                  @click="handleItemClick(row)"
-                  :class="{ 'folder-name': isFolder(row), 'file-name': !isFolder(row) }"
-              >
+    <!-- 表头 -->
+    <div class="table-header">
+      <div class="col checkbox">
+        <input
+            type="checkbox"
+            :checked="isAllSelected"
+            :indeterminate="isIndeterminate"
+            @change="toggleSelectAll"
+            title="全选/取消全选"
+        />
+      </div>
+      <div class="col name">文件名</div>
+      <div class="col size">大小</div>
+      <div class="col time">修改时间</div>
+      <div class="col action">操作</div>
+    </div>
+
+    <!-- 虚拟表格主体 -->
+    <RecycleScroller
+        class="virtual-table"
+        :items="sortedFileList"
+        :item-size="42"
+        key-field="id"
+        v-slot="{ item: row }"
+    >
+      <div class="row">
+        <!-- 选择框 -->
+        <div class="col checkbox">
+          <input
+              type="checkbox"
+              :checked="selectedIds.has(row.id)"
+              :disabled="isFolder(row)"
+              @change="toggleSelection(row)"
+          />
+        </div>
+
+        <!-- 文件名 -->
+        <div class="col name">
+          <FileIcon
+              style="margin-right: 5px;"
+              :file-type="row.fileType"
+              :is-folder="isFolder(row)"
+          />
+          <span
+              @click="handleItemClick(row)"
+              :class="{ 'folder-name': isFolder(row), 'file-name': !isFolder(row) }"
+          >
             {{ row.originalFileName }}
           </span>
-            </div>
-          </template>
-        </el-table-column>
+        </div>
 
-        <el-table-column prop="fileSize" label="大小" width="120" class-name="size-column" align="center">
-          <template #default="{ row }">
-            <span v-if="!isFolder(row)">{{ formatSize(row.fileSize) }}</span>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
+        <!-- 文件大小 -->
+        <div class="col size">
+          <span v-if="!isFolder(row)">{{ formatSize(row.fileSize) }}</span>
+          <span v-else>-</span>
+        </div>
 
-        <el-table-column prop="updatedAt" label="修改时间" width="180" class-name="time-column" align="center">
-          <template #default="{ row }">
-            {{ formatDate(row.updatedAt) }}
-          </template>
-        </el-table-column>
+        <!-- 修改时间 -->
+        <div class="col time">{{ formatDate(row.updatedAt) }}</div>
 
-        <el-table-column label="操作" width="200" class-name="action-column" align="center">
-          <template #default="{ row }">
-            <el-button
-                style="color: #000"
-                v-if="!isFolder(row)"
-                type="primary"
-                size="small"
-                @click="handleDownload(row)"
-            >
-              下载
-            </el-button>
-            <!-- <el-button
+        <!-- 操作 -->
+        <div class="col action">
+          <el-button
               v-if="!isFolder(row)"
-              type="success"
+              type="primary"
               size="small"
-              @click="handleAddToDownload(row)"
+              @click="handleDownload(row)"
+          >
+            下载
+          </el-button>
+          <el-button
+              type="danger"
+              size="small"
               style="margin-left: 4px;"
-            >
-              加入下载
-            </el-button> -->
-            <el-button
-                type="danger"
-                size="small"
-                @click="handleDelete(row)"
-                style="margin-left: 4px;"
-            >
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+              @click="handleDelete(row)"
+          >
+            删除
+          </el-button>
+        </div>
+      </div>
+    </RecycleScroller>
   </div>
 </template>
 
 <script setup>
-import {defineProps, defineEmits, ref, computed} from 'vue';
-import {ElMessage} from 'element-plus';
-import FileIcon from './FileIcon.vue';
+import {ref, computed, watch} from 'vue'
+import {RecycleScroller} from 'vue-virtual-scroller'
+import {ElMessage} from 'element-plus'
+import FileIcon from './FileIcon.vue'
 
 const props = defineProps({
-  fileList: {
-    type: Array,
-    default: () => []
-  }
-});
-
-// 排序后的文件列表：文件夹在前，文件在后，再按名字升序
-const sortedFileList = computed(() => {
-  return [...props.fileList].sort((a, b) => {
-    const aIsFolder = a.fileType === 'folder' || a.isFolder === true || a.isDir === 1;
-    const bIsFolder = b.fileType === 'folder' || b.isFolder === true || b.isDir === 1;
-
-    if (aIsFolder && !bIsFolder) return -1; // a是文件夹，排前
-    if (!aIsFolder && bIsFolder) return 1;  // b是文件夹，排前
-
-    // 如果都是文件夹 / 都是文件，就按文件名升序
-    return a.originalFileName.localeCompare(b.originalFileName, 'zh-CN');
-  });
-});
-
+  fileList: {type: Array, default: () => []}
+})
 
 const emit = defineEmits([
   'enter-folder',
@@ -143,138 +143,214 @@ const emit = defineEmits([
   'drag-over',
   'drop',
   'batch-download',
-  'batch-delete',
-  'add-to-download'
-]);
+  'batch-delete'
+])
 
-const tableRef = ref(null);
-const selectedFiles = ref([]);
+const selectedIds = ref(new Set());
 
-// 判断是否为文件夹
-const isFolder = (item) => {
-  return item.fileType === 'folder' || item.isFolder === true || item.isDir === 1;
-};
+// ✅ 已选择文件（用 Set 更高效）
+const selectedFiles = computed(() => {
+  return sortedFileList.value.filter(f => selectedIds.value.has(f.id))
+})
 
-// 文件类型判断方法
-const isImageFile = (fileType) => {
-  return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(fileType?.toLowerCase());
-};
+// 可选择的文件（排除文件夹）
+const selectableFiles = computed(() => {
+  return sortedFileList.value.filter(f => !isFolder(f))
+})
 
-const isAudioFile = (fileType) => {
-  return ['mp3', 'wav', 'flac', 'aac', 'ogg', 'wma'].includes(fileType?.toLowerCase());
-};
+// 全选状态
+const isAllSelected = computed(() => {
+  return selectableFiles.value.length > 0 && 
+         selectableFiles.value.every(f => selectedIds.value.has(f.id))
+})
 
-const isDocumentFile = (fileType) => {
-  return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'].includes(fileType?.toLowerCase());
-};
+// 半选状态
+const isIndeterminate = computed(() => {
+  const selectedCount = selectableFiles.value.filter(f => selectedIds.value.has(f.id)).length
+  return selectedCount > 0 && selectedCount < selectableFiles.value.length
+})
 
-// 格式化文件大小
+// 文件统计
+const totalCount = computed(() => props.fileList.length)
+const fileCount = computed(() => props.fileList.filter(f => !isFolder(f)).length)
+const folderCount = computed(() => props.fileList.filter(f => isFolder(f)).length)
+
+
+// ✅ 排序：文件夹在前，名字升序
+const sortedFileList = computed(() => {
+  return [...props.fileList].sort((a, b) => {
+    const aIsFolder = isFolder(a)
+    const bIsFolder = isFolder(b)
+    if (aIsFolder && !bIsFolder) return -1
+    if (!aIsFolder && bIsFolder) return 1
+    return a.originalFileName.localeCompare(b.originalFileName, 'zh-CN')
+  })
+})
+
+const isFolder = (item) => item.fileType === 'folder' || item.isFolder || item.isDir === 1
+
 const formatSize = (size) => {
-  if (size < 1024) return size + ' B';
-  if (size < 1024 * 1024) return (size / 1024).toFixed(2) + ' KB';
-  return (size / (1024 * 1024)).toFixed(2) + ' MB';
-};
+  if (!size) return '-'
+  if (size < 1024) return size + ' B'
+  if (size < 1024 * 1024) return (size / 1024).toFixed(2) + ' KB'
+  return (size / (1024 * 1024)).toFixed(2) + ' MB'
+}
 
-// 格式化日期
 const formatDate = (dateString) => {
-  if (!dateString) return '-';
-  const date = new Date(dateString);
-  return date.toLocaleString('zh-CN');
-};
+  if (!dateString) return '-'
+  return new Date(dateString).toLocaleString('zh-CN')
+}
 
-// 处理项目点击
+// ✅ 勾选逻辑
+const toggleSelection = (row) => {
+  if (selectedIds.value.has(row.id)) {
+    selectedIds.value.delete(row.id)
+  } else {
+    if (!isFolder(row)) selectedIds.value.add(row.id)
+  }
+}
+
+const clearSelection = () => selectedIds.value.clear()
+
+// 全选/取消全选
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    // 取消全选
+    selectedIds.value.clear()
+  } else {
+    // 全选
+    selectableFiles.value.forEach(f => selectedIds.value.add(f.id))
+  }
+}
+
 const handleItemClick = (row) => {
-  if (isFolder(row)) {
-    emit('enter-folder', row);
-  }
-};
+  if (isFolder(row)) emit('enter-folder', row)
+}
 
-// 处理下载
-const handleDownload = (row) => {
-  emit('download-file', row);
-};
+const handleDownload = (row) => emit('download-file', row)
+const handleDelete = (row) => emit('delete-item', row)
 
-// 处理加入下载队列
-const handleAddToDownload = (row) => {
-  emit('add-to-download', row);
-};
-
-// 处理选择变化
-const handleSelectionChange = (selection) => {
-  selectedFiles.value = selection.filter(item => !isFolder(item));
-};
-
-// 判断行是否可选择（只有文件可以选择）
-const isSelectable = (row) => {
-  return !isFolder(row);
-};
-
-// 批量下载
 const handleBatchDownload = () => {
-  if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要下载的文件');
-    return;
+  if (selectedIds.value.size === 0) {
+    ElMessage.warning('请先选择要下载的文件')
+    return
   }
-  emit('batch-download', selectedFiles.value);
-};
+  emit(
+      'batch-download',
+      sortedFileList.value.filter((f) => selectedIds.value.has(f.id))
+  )
+}
 
-// 批量删除
 const handleBatchDelete = () => {
-  if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要删除的文件');
-    return;
+  if (selectedIds.value.size === 0) {
+    ElMessage.warning('请先选择要删除的文件')
+    return
   }
-  emit('batch-delete', selectedFiles.value);
-};
+  emit(
+      'batch-delete',
+      sortedFileList.value.filter((f) => selectedIds.value.has(f.id))
+  )
+}
 
-// 清除选择
-const clearSelection = () => {
-  if (tableRef.value) {
-    tableRef.value.clearSelection();
+const handleDragOver = (e) => emit('drag-over', e)
+const handleDrop = (e) => emit('drop', e)
+
+// 键盘快捷键处理
+const handleKeyDown = (e) => {
+  // Ctrl+A 全选
+  if (e.ctrlKey && e.key === 'a') {
+    e.preventDefault()
+    if (selectableFiles.value.length > 0) {
+      selectableFiles.value.forEach(f => selectedIds.value.add(f.id))
+    }
+    return
   }
-  selectedFiles.value = [];
-};
+  
+  // Escape 取消选择
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    clearSelection()
+    return
+  }
+  
+  // Delete 删除选中文件
+  if (e.key === 'Delete' && selectedFiles.value.length > 0) {
+    e.preventDefault()
+    handleBatchDelete()
+    return
+  }
+ }
 
-// 处理删除
-const handleDelete = (row) => {
-  emit('delete-item', row);
-};
-
-// 拖拽处理
-const handleDragOver = (e) => {
-  emit('drag-over', e);
-};
-
-const handleDrop = (e) => {
-  emit('drop', e);
-};
+// 监听文件列表变化，清除无效选择
+watch(
+  () => props.fileList,
+  (newList) => {
+    if (selectedIds.value.size > 0) {
+      const validIds = new Set(newList.map(f => f.id))
+      const invalidIds = [...selectedIds.value].filter(id => !validIds.has(id))
+      
+      if (invalidIds.length > 0) {
+        invalidIds.forEach(id => selectedIds.value.delete(id))
+      }
+    }
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped>
 .file-list {
-  height: 100%;
-  background: var(--bg-primary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-light);
+  height: 100%;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  outline: none;
 }
 
-/* 批量操作栏 */
+.file-list:focus {
+  box-shadow: 0 0 0 2px #3b82f6;
+}
+
+/* 文件统计信息 */
+.file-stats {
+  padding: 8px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.stats-info {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.total-count {
+  font-weight: 600;
+  color: #334155;
+}
+
+.file-count,
+.folder-count {
+  color: #64748b;
+}
+
+/* 批量操作工具栏 */
 .batch-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
-  background: var(--el-color-primary-light-9);
-  border-bottom: 1px solid var(--el-color-primary-light-7);
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .selected-info {
-  font-size: 13px;
-  color: var(--el-color-primary);
+  font-size: 14px;
+  color: #475569;
   font-weight: 500;
 }
 
@@ -283,178 +359,182 @@ const handleDrop = (e) => {
   gap: 8px;
 }
 
-/* 表格容器 */
-.table-container {
-  flex: 1;
-  overflow-x: auto;
-  background: var(--bg-primary);
-  -webkit-overflow-scrolling: touch;
+/* 表头样式 */
+.table-header {
+  display: flex;
+  align-items: center;
+  background: #f1f5f9;
+  border-bottom: 2px solid #e2e8f0;
+  height: 44px;
+  padding: 0 12px;
+  font-weight: 600;
+  color: #334155;
+  font-size: 13px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
-.table {
-  width: 100%;
-  min-width: 600px;
-
-  /* 滚动条 */
-
-  &::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--border-medium);
-    border-radius: 4px;
-  }
-
-  &::-webkit-scrollbar-thumb:hover {
-    background: var(--border-dark);
-  }
-
-  :deep(.el-table) {
-    background: transparent;
-    border: none;
-    font-size: 14px;
-
-    .el-table__header {
-      background: var(--bg-secondary);
-    }
-
-    .el-table__header th {
-      border-bottom: 1px solid var(--border-light);
-      color: var(--text-secondary);
-      font-weight: 500;
-      font-size: 13px;
-      padding: 8px;
-    }
-
-    .el-table__body tr {
-      transition: var(--transition-fast);
-    }
-
-    .el-table__body tr:hover {
-      background: var(--bg-hover);
-    }
-
-    .el-table__body td {
-      border-bottom: 1px solid var(--border-light);
-      padding: 8px;
-      color: var(--text-primary);
-      font-size: 13px;
-    }
-
-    .el-table__empty-text {
-      color: var(--text-secondary);
-      font-size: 13px;
-    }
-  }
+/* 行样式 */
+.row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #f1f5f9;
+  height: 42px;
+  padding: 0 12px;
+  transition: background-color 0.2s ease;
 }
 
-/* 文件名样式 */
-.folder-name {
-  color: var(--primary-color);
-  cursor: pointer;
-  transition: var(--transition-fast);
+.row:hover {
+  background-color: #f8fafc;
 }
 
-.folder-name:hover {
-  color: var(--primary-hover);
+.row:last-child {
+  border-bottom: none;
 }
 
-.file-name {
-  color: var(--text-primary);
-}
-
-/* 操作按钮 */
-:deep(.el-button) {
-  height: 26px;
-  font-size: 12px;
-  border-radius: var(--radius-sm);
-  padding: 0 8px;
-}
-
-:deep(.el-button--primary) {
-  background: var(--primary-color);
-  border-color: var(--primary-color);
-  color: #fff;
-}
-
-:deep(.el-button--primary:hover) {
-  background: var(--primary-hover);
-}
-
-/* 拖拽上传提示 */
-.file-list.drag-over {
-  background: rgba(24, 144, 255, 0.05);
-  border: 2px dashed var(--primary-color);
-}
-
-.file-list.drag-over::after {
-  content: '拖拽文件到此处上传';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--primary-color);
-  font-size: 14px;
-  background: var(--bg-primary);
-  padding: 8px 16px;
-  border-radius: 6px;
-}
-
-/* 空状态 */
-.empty-state {
+/* 列样式 */
+.col.checkbox {
+  width: 55px;
   text-align: center;
-  padding: 40px 20px;
-  color: var(--text-secondary);
 }
 
-.empty-state .empty-icon {
-  font-size: 48px;
+.col.checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.col.checkbox input[type="checkbox"]:disabled {
+  cursor: not-allowed;
   opacity: 0.5;
 }
 
-.empty-state .empty-text {
+.col.name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.folder-name {
+  cursor: pointer;
+  color: #3b82f6;
+  font-weight: 500;
+  transition: color 0.2s ease;
+  user-select: none;
+}
+
+.folder-name:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.file-name {
+  color: #475569;
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col.size {
+  width: 120px;
+  text-align: center;
+  color: #64748b;
   font-size: 13px;
-  margin-top: 8px;
 }
 
-/* 响应式 */
-@media (max-width: 1024px) {
-  .size-column {
-    display: none !important;
-  }
-
-  .action-column {
-    width: 160px !important;
-  }
+.col.time {
+  width: 180px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
 }
 
+.col.action {
+  width: 200px;
+  text-align: center;
+}
+
+/* 虚拟滚动容器 */
+.virtual-table {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 滚动条样式 */
+.virtual-table::-webkit-scrollbar {
+  width: 8px;
+}
+
+.virtual-table::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.virtual-table::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.virtual-table::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 响应式设计 */
 @media (max-width: 768px) {
-  .size-column, .time-column {
-    display: none !important;
+  .col.time {
+    display: none;
   }
-
-  .action-column {
-    width: 140px !important;
+  
+  .col.action {
+    width: 120px;
   }
-
+  
   .batch-toolbar {
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    align-items: stretch;
+  }
+  
+  .batch-actions {
+    justify-content: center;
+  }
+  
+  .stats-info {
+    gap: 12px;
+    font-size: 12px;
   }
 }
 
 @media (max-width: 480px) {
-  .action-column .cell {
-    display: flex;
+  .col.size {
+    display: none;
+  }
+  
+  .col.action {
+    width: 80px;
+  }
+  
+  .row {
+    padding: 0 8px;
+  }
+  
+  .table-header {
+    padding: 0 8px;
+  }
+  
+  .file-stats {
+    padding: 6px 8px;
+  }
+  
+  .stats-info {
     flex-direction: column;
     gap: 4px;
-  }
-
-  :deep(.el-button) {
-    width: 100%;
-    padding: 2px 4px;
     font-size: 11px;
   }
 }

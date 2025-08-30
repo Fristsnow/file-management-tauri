@@ -5,7 +5,7 @@
 
       <div class="breadcrumb-item root-item" @click="navigateToProject">
         <el-icon class="home-icon"><House /></el-icon>
-        <span class="item-text">{{ currentProject ? currentProject.originalFileName : '根目录' }}</span>
+        <span class="item-text">{{ currentProject ? currentProject.originalFileName : '选择工作空间' }}</span>
       </div>
 
       <template v-for="(item, index) in breadcrumbItems" :key="index">
